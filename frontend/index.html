@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Yumi — AI Waifu Companion</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body data-bg="studio">
+  <div id="app">
+    <canvas id="scene-canvas"></canvas>
+
+    <!-- Top-right corner: settings gear -->
+    <button id="settings-toggle" class="corner-btn" title="Settings" aria-label="Settings">⚙️</button>
+
+    <!-- Small always-visible status pill, top-left -->
+    <div id="status-pill">
+      <span id="char-name">Yumi</span>
+      <span id="affection-dot" title="Affection"></span>
+      <span id="affection-value">0</span>
+    </div>
+
+    <!-- Caption — appears synced with her voice, fades in/out -->
+    <div id="caption-box" class="hidden">
+      <p id="caption-text"></p>
+    </div>
+
+    <!-- Bottom floating pill bar -->
+    <div id="input-bar" class="hidden-obs">
+      <button id="attach-btn" class="pill-icon-btn" title="Attach / vision">+</button>
+      <form id="text-form" autocomplete="off">
+        <input id="text-input" type="text" placeholder="Type a message..." />
+      </form>
+      <button id="mic-toggle" class="pill-icon-btn" title="Mic">🎤</button>
+    </div>
+
+    <!-- "+" popover: VRM upload, screen share, webcam -->
+    <div id="attach-menu" class="popover hidden">
+      <label class="popover-item">
+        📁 Upload VRM model
+        <input id="vrm-upload" type="file" accept=".vrm" hidden />
+      </label>
+      <button id="screen-share-toggle" class="popover-item" type="button">🖥️ Screen share: off</button>
+      <button id="webcam-toggle" class="popover-item" type="button">📷 Webcam: off</button>
+    </div>
+
+    <!-- Settings drawer -->
+    <div id="settings-drawer" class="drawer hidden-obs hidden">
+      <div class="drawer-header">
+        <h2>Settings</h2>
+        <button id="settings-close" class="corner-btn small">✕</button>
+      </div>
+
+      <section class="drawer-section">
+        <h3>Background</h3>
+        <div class="radio-row">
+          <label><input type="radio" name="bg-mode" value="studio" /> Studio (default)</label>
+          <label><input type="radio" name="bg-mode" value="white" /> Plain white</label>
+          <label><input type="radio" name="bg-mode" value="transparent" /> Transparent (pet / OBS overlay)</label>
+        </div>
+        <p class="hint">Transparent mode drops the background entirely — pair it with the desktop overlay
+          window (see electron/) or an OBS browser source with alpha support.</p>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Character</h3>
+        <label class="field-label">Name
+          <input id="setting-character-name" type="text" />
+        </label>
+        <label class="field-label">Fish Audio voice reference ID
+          <input id="setting-voice-id" type="text" placeholder="leave blank for default voice" />
+        </label>
+        <button id="settings-save" class="primary-btn" type="button">Save</button>
+        <p id="settings-save-status" class="hint"></p>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Memory</h3>
+        <p class="hint">She decides what's worth remembering herself — nothing here expires automatically.
+          Delete anything you don't want her to keep.</p>
+        <ul id="memory-list"></ul>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Diary</h3>
+        <button id="write-diary-btn" class="primary-btn" type="button">Write a diary entry now</button>
+        <ul id="diary-list"></ul>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Usage this session</h3>
+        <ul id="usage-list" class="usage-list"></ul>
+      </section>
+    </div>
+  </div>
+
+  <audio id="tts-audio-player" style="display:none;"></audio>
+  <video id="screen-video" style="display:none;"></video>
+  <video id="webcam-video" style="display:none;"></video>
+  <canvas id="frame-canvas" style="display:none;"></canvas>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.1/lib/three-vrm.module.js"
+    }
+  }
+  </script>
+
+  <!-- Client-side Silero VAD (always-on listening + barge-in). Non-module
+       script tags on purpose — vad-web exposes a global `vad` object,
+       which app.js (an ES module below) reads off `window.vad`. -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

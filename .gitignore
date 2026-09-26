@@ -1,0 +1,19 @@
+# Secrets — never commit your real API keys
+.env
+
+# Personal memory/conversation data — don't share your own chat history
+backend/memory_store.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node (electron/)
+node_modules/
+package-lock.json
+
+# OS junk
+.DS_Store
+Thumbs.db

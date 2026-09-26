@@ -1,0 +1,12 @@
+{
+  "name": "yumi-desktop-overlay",
+  "version": "1.0.0",
+  "description": "Transparent always-on-top desktop overlay window for the Yumi companion frontend.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}

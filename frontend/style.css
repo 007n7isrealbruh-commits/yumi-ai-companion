@@ -1,0 +1,354 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---------- Background modes ---------- */
+/* "studio" (default), "white", "transparent" — set via the settings drawer,
+   persisted client-side. Transparent mode is meant for a desktop-overlay
+   window (electron/) or an OBS browser source with alpha enabled. */
+body[data-bg="studio"] {
+  background: radial-gradient(circle at 50% 30%, #2b1f3d 0%, #120c1c 70%);
+}
+body[data-bg="white"] {
+  background: #ffffff;
+}
+body[data-bg="transparent"] {
+  background: transparent;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#scene-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ---------- Corner buttons ---------- */
+.corner-btn {
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  right: 18px;
+  z-index: 20;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,143,199,0.35);
+  background: rgba(20, 14, 32, 0.55);
+  color: #fdf2ff;
+  font-size: 18px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+body[data-bg="white"] .corner-btn {
+  background: rgba(255,255,255,0.75);
+  color: #2b1f3d;
+  border-color: rgba(0,0,0,0.1);
+}
+.corner-btn.small {
+  position: static;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
+/* ---------- Status pill ---------- */
+#status-pill {
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  left: 18px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 14, 32, 0.55);
+  border: 1px solid rgba(255,143,199,0.3);
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: #fdf2ff;
+  font-size: 13px;
+  backdrop-filter: blur(8px);
+}
+body[data-bg="white"] #status-pill {
+  background: rgba(255,255,255,0.75);
+  color: #2b1f3d;
+  border-color: rgba(0,0,0,0.08);
+}
+#char-name { font-weight: 700; color: #ff8fc7; }
+#affection-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #ff8fc7;
+  box-shadow: 0 0 6px #ff8fc7;
+}
+
+/* ---------- Caption ---------- */
+#caption-box {
+  position: absolute;
+  left: 50%;
+  bottom: calc(110px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  max-width: min(640px, 88vw);
+  background: rgba(15, 10, 25, 0.62);
+  border: 1px solid rgba(255,143,199,0.35);
+  border-radius: 18px;
+  padding: 16px 24px;
+  color: #fdf2ff;
+  font-size: 19px;
+  line-height: 1.4;
+  text-align: center;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  opacity: 1;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  z-index: 15;
+}
+#caption-box.hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+  pointer-events: none;
+}
+body[data-bg="white"] #caption-box {
+  background: rgba(255,255,255,0.85);
+  color: #2b1f3d;
+  border-color: rgba(0,0,0,0.08);
+}
+
+/* ---------- Bottom pill input bar ---------- */
+#input-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(560px, 92vw);
+  background: rgba(20, 14, 32, 0.55);
+  border: 1px solid rgba(255,143,199,0.35);
+  border-radius: 999px;
+  padding: 8px 10px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  transition: opacity 0.2s ease;
+}
+body[data-bg="white"] #input-bar {
+  background: rgba(255,255,255,0.85);
+  border-color: rgba(0,0,0,0.08);
+}
+#input-bar.hidden-obs { display: none; }
+
+.pill-icon-btn {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #ff8fc7, #b56cff);
+  color: #1a0f28;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#mic-toggle.muted { background: #3a3145; color: #b9a7d6; }
+#mic-toggle.speaking { box-shadow: 0 0 0 4px rgba(255,143,199,0.35); }
+
+#text-form { flex: 1 1 auto; display: flex; }
+#text-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #fdf2ff;
+  font-size: 15px;
+  padding: 8px 10px;
+  outline: none;
+}
+body[data-bg="white"] #text-input { color: #2b1f3d; }
+#text-input::placeholder { color: #b9a7d6; }
+body[data-bg="white"] #text-input::placeholder { color: #9a8fb0; }
+
+/* ---------- Attach popover ---------- */
+.popover {
+  position: absolute;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(calc(-50% - 220px));
+  z-index: 25;
+  background: rgba(20, 14, 32, 0.92);
+  border: 1px solid rgba(255,143,199,0.35);
+  border-radius: 14px;
+  padding: 8px;
+  min-width: 220px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+}
+.popover.hidden { display: none; }
+.popover-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #fdf2ff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.popover-item:hover { background: rgba(255,143,199,0.15); }
+.popover-item.active { color: #ff8fc7; font-weight: 600; }
+
+/* ---------- Settings drawer ---------- */
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 92vw);
+  background: rgba(15, 10, 25, 0.96);
+  border-left: 1px solid rgba(255,143,199,0.3);
+  backdrop-filter: blur(14px);
+  z-index: 30;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  color: #fdf2ff;
+  transform: translateX(0);
+  transition: transform 0.25s ease;
+}
+.drawer.hidden { transform: translateX(105%); }
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.drawer-header h2 { font-size: 18px; color: #ff8fc7; }
+
+.drawer-section {
+  margin-bottom: 26px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255,143,199,0.15);
+}
+.drawer-section h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #b9a7d6;
+  margin-bottom: 10px;
+}
+.radio-row { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.radio-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+.hint { font-size: 12px; color: #8579a3; margin-top: 8px; line-height: 1.4; }
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: #b9a7d6;
+  margin-bottom: 10px;
+}
+.field-label input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,143,199,0.3);
+  background: rgba(0,0,0,0.3);
+  color: #fdf2ff;
+  font-size: 13px;
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #ff8fc7, #b56cff);
+  border: none;
+  color: #1a0f28;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+#diary-list, .usage-list, #memory-list {
+  list-style: none;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+#diary-list li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e0d6f5;
+  background: rgba(255,143,199,0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+#diary-list li .diary-date { display: block; font-size: 11px; color: #8579a3; margin-bottom: 4px; }
+#memory-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: #e0d6f5;
+  background: rgba(255,143,199,0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+#memory-list .memory-fact-text { flex: 1 1 auto; line-height: 1.4; }
+#memory-list .memory-delete-btn {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,143,199,0.2);
+  color: #ff8fc7;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+#memory-list .memory-empty { color: #8579a3; font-style: italic; font-size: 13px; }
+.usage-list li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #e0d6f5;
+}
+
+.hidden { display: none !important; }
+
+/* OBS/streaming layout: ?obs=1 hides all chrome except the avatar + caption */
+body.obs-mode #status-pill,
+body.obs-mode #settings-toggle,
+body.obs-mode #input-bar,
+body.obs-mode #attach-menu {
+  display: none !important;
+}

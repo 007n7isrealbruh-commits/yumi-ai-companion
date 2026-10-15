@@ -10,6 +10,92 @@ the tier is folded into her system prompt each turn.
 
 ## What's new in this round
 
+- **Choose your brain (LLM provider) from the UI.** Settings → Brain: pick
+  Gemini, OpenAI, Groq, NVIDIA NIM, DeepSeek, xAI, Ollama (local),
+  LM Studio (local), or Custom (any OpenAI-compatible URL), type the
+  model name, paste a key, hit "Save & switch" — her very next reply uses
+  it, no restart. Gemini keeps web search / thinking / vision (native
+  features); the others share one OpenAI-compatible client
+  (`backend/providers/`). Vision works on providers/models marked vision-
+  capable; web search is Gemini-only for now. Settings changes are
+  runtime-only — put them in `.env` too to survive a restart.
+  Run fully free/offline: `LLM_PROVIDER=ollama`, `LLM_MODEL=llama3.3`.
+- **Redesigned UI** built from the open-source Utsuwa project's design
+  system (neutral fills, one blue accent, system font, 44px touch
+  targets, light/dark aware). Settings are now categorized — sidebar on
+  desktop, horizontal tabs on phones — with new Brain, Voice, History
+  panels. Fully responsive for PC and mobile.
+- **Fixed: hands floating out like a T-pose.** three-vrm normalizes every
+  model to T-pose; nothing was ever lowering the arms (and the gesture
+  code reset them to T-pose between gestures). Now a per-model idle rest
+  pose is applied on load (VRM 0.x and 1.0 use opposite rotation signs —
+  both handled) and gestures blend to/from it. If your model's arms look
+  slightly off, tune `REST_POSE_BY_VERSION` at the top of `vrmManager.js`.
+- **Fixed: speech heard in the server log but not shown in the UI.** Two
+  causes: (1) every server message from an "older" request was silently
+  dropped once VAD started a newer one; only the final spoken reply is
+  ever suppressed now. (2) The transcript was drawn into the same caption
+  that the "thinking..." status immediately overwrote — your words now
+  get their own persistent bubble and a History panel. VAD is also
+  slightly stricter so noise doesn't fire fake utterances.
+- **Fixed: settings didn't work.** The frontend hardcoded `localhost`, so
+  opening it from any other device (phone -> PC's IP) sent every settings
+  request to the phone itself. It now uses the hostname the page was
+  loaded from. Save buttons also now report real server errors instead of
+  always saying "Saved".
+- **Fixed: crash on startup with a non-Gemini brain and no Gemini key.**
+  The Gemini client is now created lazily; embeddings quietly fall back
+  to keyword matching without a key.
+- `backend/gemini_engine.py` was replaced by `backend/brain.py` (provider-
+  agnostic) + `backend/providers/`.
+
+## What's new in this round — relationship engine rewrite
+
+You said "increasing affection by each message isn't good — use Utsuwa."
+I read Utsuwa's actual engine (`src/lib/engine/{heuristics,state-updates,
+stages}.ts` — open source, read directly, not guessed) and ported its real
+mechanics into `backend/heuristics.py` + a rewritten `memory_manager.py`,
+adapted from its 8-stage romantic ladder to our deliberately non-romantic
+4-tier one (that boundary was a prior explicit decision, kept on purpose).
+
+- **Five axes, not one**: affection, trust, intimacy, comfort, respect.
+  A message is analyzed for sentiment, topic depth (shallow/moderate/deep),
+  emotional content, and whether it's a question — each moves a different
+  combination of axes. Thanking her and confiding in her are no longer the
+  same `+1`.
+- **Tiers require more than a score** — `TIER_REQUIREMENTS` in
+  `memory_manager.py` now gates each tier behind affection AND trust AND a
+  minimum interaction count AND (for "attached") days known across more
+  than one calendar day. You cannot grind to the top tier in one spam
+  session anymore — verified in a test: 60 identical "thanks, you're
+  great" messages in one sitting raises affection but cannot reach
+  "attached" without the days/interactions to back it up.
+- **Hysteresis-banded demotion**: a stat has to fall below 85% of the
+  current tier's floor to demote, not just dip under it once — one rough
+  exchange doesn't flip-flop the relationship stage on the next good one.
+- **Time decay on absence** (didn't exist before at all): affection/trust
+  gently decay if you're gone for days, applied once per absence, not
+  every reply.
+- Two real bugs caught while porting (via an actual test suite, not by
+  inspection): a formula where `-1` sentiment exactly canceled `+1`
+  baseline (negative messages read as neutral), and Python's `int()`
+  truncating toward zero where the original JS `Math.floor()` always
+  rounds down — silently weakening every negative delta. Both fixed.
+- The Brain/LLM provider panel, settings redesign, VRM rest-pose fix, and
+  STT/localhost bug fixes from the previous round are unchanged — see
+  further down for those.
+
+**What I did NOT do**: rebuild this as the actual Utsuwa SvelteKit/Tauri
+application. That request needs a live `npm install`'d repo with the
+Tauri/Rust toolchain so changes can actually be built and tested — this
+sandbox has no network access and can't run that pipeline. For modifying
+the real Utsuwa repo on your own machine (where you have those tools),
+Claude Code is the right tool, not this chat. What's above is a real,
+tested port of its relationship-engine *logic* into our own working
+Python project, which I could actually verify.
+
+## Previous rounds
+
 - **Memory: she decides what to remember, not a regex.** The old
   `_extract_fact()` only caught things matching a narrow pattern ("my
   name is X"). Now she extracts it herself every turn via a hidden
@@ -58,7 +144,7 @@ Two files, two different jobs:
 
 - Every turn, she outputs a hidden `[memory: fact1 ; fact2]` tag (or
   `[memory: none]`) deciding what's worth keeping from that exchange —
-  see `_split_tags()` in `gemini_engine.py`.
+  see `_split_tags()` in `backend/brain.py`.
 - Saved facts never expire and are never auto-evicted. The settings
   drawer's **Memory** section lists everything she's kept, with a ✕ to
   delete anything by hand.
@@ -255,4 +341,4 @@ transparent instead of showing a solid color. See the comments in
 | Browser console: `WebSocket connection to 'ws://localhost:8000/ws' failed` | Backend not running, wrong port, or loading the frontend over `https://` (mixed content blocks plain `ws://`) | Confirm `uvicorn` is running; load the frontend over `http://`, not `https://`. |
 | No sound but subtitle text appears | TTS returned empty audio (see server logs for a `[TTS]` line) | Check the Fish Audio rows above. |
 | VRM loads but doesn't blink/breathe/glance around | Model has no `blink`/`happy`/etc. expression presets, or no `spine`/`leftEye`/`rightEye` humanoid bones mapped | Re-export the VRM ensuring standard VRM expression presets and full humanoid bone mapping are included (most VRoid Studio exports already have these). |
-| Facial expression never changes even though replies clearly have emotion | Gemini omitted the `[emotion: X]` tag (rare, but possible with a very short/unusual reply) | `_split_emotion_tag` in `gemini_engine.py` already defaults to `"neutral"` when the tag is missing or invalid, so this fails safe — if it happens a lot, lower `GEMINI_TEMPERATURE` slightly or check server logs for the raw reply. |
+| Facial expression never changes even though replies clearly have emotion | Gemini omitted the `[emotion: X]` tag (rare, but possible with a very short/unusual reply) | `_split_tags` in `backend/brain.py` already defaults to `"neutral"` when the tag is missing or invalid, so this fails safe — if it happens a lot, lower `GEMINI_TEMPERATURE` slightly or check server logs for the raw reply. |

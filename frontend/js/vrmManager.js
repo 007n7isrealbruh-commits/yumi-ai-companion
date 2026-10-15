@@ -1,137 +1,325 @@
+/**
+ * frontend/js/vrmManager.js
+ * High-performance 3D VRM Runtime Engine.
+ *
+ * Upgrades:
+ * - Integration with centralized AnimationManager (IDLE, LISTENING, THINKING, TALKING).
+ * - Full 360-degree OrbitControls with free zoom, orbiting, damping, and multi-touch support.
+ * - Non-conflicting programmatic camera transitions that instantly yield to user orbit/zoom inputs.
+ * - Native @pixiv/three-vrm-animation and THREE.AnimationMixer plugin support for VRMA loading.
+ * - Dynamic VRM LookAt targeting with natural cervical lag and eye saccades.
+ * - Comprehensive error containment ensuring the render loop never freezes.
+ */
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
+import {
+  AnimationManager,
+  CompanionState,
+  EMOTION_PRESETS,
+  GESTURE_EULER_POSES,
+} from './animationManager.js';
 
-// Maps Yumi's emotion tag (from the backend's [emotion: X] parse) onto a
-// blend of VRM 1.0's standard expression presets (happy/angry/sad/relaxed/
-// surprised). "embarrassed" has no standard VRM preset, so it's built as a
-// happy+angry blend — a classic flustered/tsundere "blush and scowl at once"
-// look — rather than skipped.
-const EMOTION_PRESETS = {
-  neutral: {},
-  happy: { happy: 1.0 },
-  angry: { angry: 1.0 },
-  sad: { sad: 1.0 },
-  surprised: { surprised: 1.0 },
-  embarrassed: { happy: 0.55, angry: 0.35 },
-};
-const EMOTION_SHAPE_NAMES = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
-const EMOTION_CROSSFADE_RATE = 0.08; // per-frame ease toward target weight
+function smoothstep(t) {
+  const c = Math.max(0, Math.min(1, t));
+  return c * c * (3 - 2 * c);
+}
 
-// --- Gesture animations (procedural, not asset-based) -----------------
-// These are coded bone-rotation poses rather than imported .vrma/Mixamo
-// clips, so the whole thing stays self-contained in this one file with
-// no external animation assets to source. The rotation values below are
-// starting points — tune them per-model, since exact "arms crossed"/
-// "hand near face" angles depend on your VRM's specific rig proportions.
-// Each pose is a one-shot: it plays over GESTURE_DURATION seconds
-// (ease in -> hold -> ease out) whenever setEmotion() receives a NEW
-// emotion, then the avatar returns to normal idle motion.
-const GESTURE_DURATION = 1.6; // seconds
-const GESTURE_POSES = {
-  neutral: null,
-  happy: { rightUpperArm: { z: -0.35 }, rightLowerArm: { z: -0.25 } }, // small raised-arm brightening
-  angry: {
-    leftUpperArm: { z: 1.0 }, rightUpperArm: { z: -1.0 },
-    leftLowerArm: { y: 0.55 }, rightLowerArm: { y: -0.55 },
-  }, // approximate arms-crossed
-  sad: { head: { x: 0.22 } }, // head droops (head.x is untouched by idle, so no conflict)
-  surprised: { leftUpperArm: { z: 0.45 }, leftLowerArm: { x: -0.85 } }, // hand toward mouth
-  embarrassed: { rightUpperArm: { z: -0.45 }, rightLowerArm: { x: -0.95 } }, // hand near face
-};
-const GESTURE_BONE_NAMES = [
-  'leftUpperArm', 'leftLowerArm', 'rightUpperArm', 'rightLowerArm', 'head',
-];
+// Camera Framing Presets (Calibrated for Full-Body & Clean Companion Viewport)
+export const CAMERA_PRESETS = Object.freeze({
+  full: {
+    landscape: {
+      target: new THREE.Vector3(0, 0.76, 0),
+      position: new THREE.Vector3(0, 0.76, 2.75),
+      fov: 32,
+    },
+    portrait: {
+      target: new THREE.Vector3(0, 0.74, 0),
+      position: new THREE.Vector3(0, 0.74, 2.85),
+      fov: 33,
+    },
+  },
+  waist: {
+    landscape: {
+      target: new THREE.Vector3(0, 1.05, 0),
+      position: new THREE.Vector3(0, 1.05, 1.95),
+      fov: 28,
+    },
+    portrait: {
+      target: new THREE.Vector3(0, 1.02, 0),
+      position: new THREE.Vector3(0, 1.02, 1.85),
+      fov: 28,
+    },
+  },
+  portrait: {
+    landscape: {
+      target: new THREE.Vector3(0, 1.32, 0),
+      position: new THREE.Vector3(0, 1.32, 1.15),
+      fov: 25,
+    },
+    portrait: {
+      target: new THREE.Vector3(0, 1.30, 0),
+      position: new THREE.Vector3(0, 1.30, 1.10),
+      fov: 26,
+    },
+  },
+});
 
-// --- Camera director ----------------------------------------------------
-// Only eases field-of-view (a "push in / pull back" zoom), never
-// repositions the camera — that way it layers on top of whatever the
-// user has done with OrbitControls instead of fighting it.
-const CAMERA_FOV_TARGETS = {
-  neutral: 30, happy: 30, angry: 27, sad: 32, surprised: 24, embarrassed: 26,
-};
-const CAMERA_EASE_RATE = 0.035;
+export function getCameraPresetConfig(presetName = 'full', isPortrait = null) {
+  if (isPortrait === null && typeof window !== 'undefined') {
+    isPortrait = window.innerWidth < window.innerHeight;
+  }
+  const group = CAMERA_PRESETS[presetName] || CAMERA_PRESETS.full;
+  const config = isPortrait ? group.portrait : group.landscape;
+  return {
+    target: config.target.clone(),
+    position: config.position.clone(),
+    fov: config.fov,
+  };
+}
 
 export class VrmManager {
   constructor(canvas) {
     this.canvas = canvas;
     this.clock = new THREE.Clock();
     this.currentVrm = null;
-    this.blinkTimer = 0;
-    this.nextBlinkAt = 3 + Math.random() * 3;
+    this.lipSync = null;
 
-    // Idle "alive" behavior state
-    this.saccadeTimer = 0;
-    this.nextSaccadeAt = 1.5 + Math.random() * 2.5;
-    this.lookTarget = { x: 0, y: 0 };
-    this.currentLook = { x: 0, y: 0 };
-    this.status = 'idle'; // set via setStatus(); drives the "thinking" pose
+    // Camera Framing State (Default: full body so entire avatar is visible on screen)
+    this.currentCameraPreset = 'full';
+    const isPortrait = typeof window !== 'undefined' ? window.innerWidth < window.innerHeight : false;
+    const initial = getCameraPresetConfig('full', isPortrait);
+    this.camStartPos = new THREE.Vector3();
+    this.camStartLook = new THREE.Vector3();
+    this.camStartFov = initial.fov;
+    this.camTargetPos = initial.position.clone();
+    this.camTargetLook = initial.target.clone();
+    this.camTargetFov = initial.fov;
+    this.camTransitionProgress = 1.0;
+    this.isTransitioningCamera = false;
+    this.isOrbiting = false;
 
-    // Emotion crossfade state
-    this.emotionTargets = {};   // shape name -> target weight (0..1)
-    this.emotionCurrent = Object.fromEntries(EMOTION_SHAPE_NAMES.map((s) => [s, 0]));
-
-    // Gesture state
-    this.lastGestureEmotion = 'neutral';
-    this.gestureStartTime = null;
-    this.activeGesturePose = null;
-
-    // Camera director state
-    this.cameraFovTarget = CAMERA_FOV_TARGETS.neutral;
+    // Interaction Raycaster
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
+    this.onTouchReaction = null;
 
     this._initScene();
+
+    // Centralized Animation Engine
+    this.animationManager = new AnimationManager({
+      scene: this.scene,
+      camera: this.camera,
+    });
+
     this._animate();
   }
 
+  attachLipSync(lipSync) {
+    this.lipSync = lipSync;
+    if (this.animationManager) {
+      this.animationManager.attachLipSync(lipSync);
+    }
+  }
+
   _initScene() {
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: true,
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
 
     this.scene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
-    this.camera.position.set(0, 1.35, 2.2);
+    const isPortrait = window.innerWidth < window.innerHeight;
+    const initial = getCameraPresetConfig('full', isPortrait);
+    this.camera = new THREE.PerspectiveCamera(
+      initial.fov,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      30
+    );
+    this.camera.position.copy(initial.position);
 
+    // OrbitControls: Full 360-degree orbit, smooth damping, responsive zoom
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 1.2, 0);
+    this.controls.target.copy(initial.target);
     this.controls.enableDamping = true;
-    this.controls.minDistance = 1.0;
-    this.controls.maxDistance = 4.0;
+    this.controls.dampingFactor = 0.08;
+    this.controls.minDistance = 0.2;
+    this.controls.maxDistance = 8.0;
+    this.controls.minPolarAngle = 0.01;
+    this.controls.maxPolarAngle = Math.PI - 0.01;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.enableZoom = true;
+    this.controls.zoomSpeed = 1.2;
+    this.controls.enableRotate = true;
+    this.controls.rotateSpeed = 0.9;
+    this.controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    };
+
+    // Prevent programmatic camera transitions from fighting user gestures
+    const cancelCameraTransition = () => {
+      this.isTransitioningCamera = false;
+    };
+
+    this.controls.addEventListener('start', () => {
+      this.isOrbiting = true;
+      cancelCameraTransition();
+    });
+    this.controls.addEventListener('end', () => {
+      this.isOrbiting = false;
+    });
+
+    this.canvas.addEventListener('wheel', cancelCameraTransition, { passive: true });
+    this.canvas.addEventListener('pointerdown', cancelCameraTransition, { passive: true });
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
     this.controls.update();
 
-    const keyLight = new THREE.DirectionalLight(0xfff2f9, 1.4);
-    keyLight.position.set(1, 2, 1.5);
+    // Studio 3-Point Lighting Rig
+    const keyLight = new THREE.DirectionalLight(0xfff6ee, 1.85);
+    keyLight.position.set(1.4, 2.2, 1.8);
     this.scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0xcfe0ff, 0.6);
-    fillLight.position.set(-1.5, 1.2, -1);
+    const fillLight = new THREE.DirectionalLight(0xd8eaff, 0.95);
+    fillLight.position.set(-1.8, 1.2, -0.6);
     this.scene.add(fillLight);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    const rimLight = new THREE.PointLight(0x00f2fe, 1.6, 7.5);
+    rimLight.position.set(0, 1.8, -1.8);
+    this.scene.add(rimLight);
+
+    const sakuraRim = new THREE.PointLight(0xff758c, 0.85, 5.0);
+    sakuraRim.position.set(1.2, 1.1, -1.2);
+    this.scene.add(sakuraRim);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.98);
     this.scene.add(ambient);
 
-    const rimLight = new THREE.PointLight(0xff9fdc, 0.8, 6);
-    rimLight.position.set(0, 1.8, -1.5);
-    this.scene.add(rimLight);
+    // Touch / Click Raycasting for Physical Feedback
+    let isDragging = false;
+    let downX = 0, downY = 0;
+    this.canvas.addEventListener('pointerdown', (e) => {
+      downX = e.clientX;
+      downY = e.clientY;
+      isDragging = false;
+    });
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 8) {
+        isDragging = true;
+      }
+    });
+    this.canvas.addEventListener('pointerup', (e) => {
+      if (!isDragging && e.button === 0) this._onClick(e);
+    });
 
     window.addEventListener('resize', () => this._onResize());
   }
 
-  _onResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  _onClick(event) {
+    if (!this.currentVrm || !this.onTouchReaction) return;
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObjects(this.currentVrm.scene.children, true);
+
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const coords = { clientX: event.clientX, clientY: event.clientY, point: hit.point };
+      if (hit.point && hit.point.y >= 1.22) {
+        this.onTouchReaction('head', coords);
+      } else {
+        this.onTouchReaction('body', coords);
+      }
+    }
   }
 
-  async loadVrmFromUrl(url) {
+  _onResize() {
+    const width = window.innerWidth || this.canvas.clientWidth || 360;
+    const height = window.innerHeight || this.canvas.clientHeight || 640;
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
+
+    if (!this.isOrbiting && !this.isTransitioningCamera) {
+      const isPortrait = width < height;
+      const preset = getCameraPresetConfig(this.currentCameraPreset, isPortrait);
+      const currentDist = this.camera.position.distanceTo(this.controls.target);
+      const presetDist = preset.position.distanceTo(preset.target);
+      if (Math.abs(currentDist - presetDist) < 0.8) {
+        this.camera.position.copy(preset.position);
+        this.controls.target.copy(preset.target);
+        this.camera.fov = preset.fov;
+        this.camera.updateProjectionMatrix();
+      }
+    }
+  }
+
+  setCameraPreset(name) {
+    const isPortrait = window.innerWidth < window.innerHeight;
+    const preset = getCameraPresetConfig(name, isPortrait);
+    if (!preset) return;
+
+    this.currentCameraPreset = name;
+    this.camStartPos.copy(this.camera.position);
+    this.camStartLook.copy(this.controls.target);
+    this.camStartFov = this.camera.fov;
+
+    this.camTargetPos.copy(preset.position);
+    this.camTargetLook.copy(preset.target);
+    this.camTargetFov = preset.fov;
+
+    this.camTransitionProgress = 0;
+    this.isTransitioningCamera = true;
+  }
+
+  _updateCamera(delta) {
+    if (this.isOrbiting || !this.isTransitioningCamera) {
+      return;
+    }
+
+    this.camTransitionProgress += delta / 0.65; // Smooth 0.65s transition
+    if (this.camTransitionProgress >= 1.0) {
+      this.camera.position.copy(this.camTargetPos);
+      this.controls.target.copy(this.camTargetLook);
+      this.camera.fov = this.camTargetFov;
+      this.camera.updateProjectionMatrix();
+      this.isTransitioningCamera = false;
+    } else {
+      const t = smoothstep(this.camTransitionProgress);
+      this.camera.position.lerpVectors(this.camStartPos, this.camTargetPos, t);
+      this.controls.target.lerpVectors(this.camStartLook, this.camTargetLook, t);
+      this.camera.fov = THREE.MathUtils.lerp(this.camStartFov, this.camTargetFov, t);
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  async loadVrmFromUrl(url, onProgress = null) {
     const loader = new GLTFLoader();
+    loader.crossOrigin = 'anonymous';
     loader.register((parser) => new VRMLoaderPlugin(parser));
+    loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
     if (this.currentVrm) {
       this.scene.remove(this.currentVrm.scene);
-      VRMUtils.deepDispose(this.currentVrm.scene);
+      try {
+        VRMUtils.deepDispose(this.currentVrm.scene);
+      } catch (e) { /* ignore */ }
       this.currentVrm = null;
     }
 
@@ -139,187 +327,187 @@ export class VrmManager {
       loader.load(
         url,
         (gltf) => {
-          const vrm = gltf.userData.vrm;
-          VRMUtils.rotateVRM0(vrm);
-          this.scene.add(vrm.scene);
-          this.currentVrm = vrm;
-          resolve(vrm);
+          try {
+            const vrm = gltf.userData?.vrm;
+            if (!vrm) {
+              console.error('[VRM] No VRM instance found in asset:', url);
+              reject(new Error('Loaded asset does not contain a valid VRM model.'));
+              return;
+            }
+
+            // Disable frustum culling so camera zoom/framing never culls avatar parts
+            vrm.scene.traverse((obj) => {
+              obj.frustumCulled = false;
+            });
+
+            try {
+              VRMUtils.removeUnnecessaryVertices(gltf.scene);
+              VRMUtils.removeUnnecessaryJoints(gltf.scene);
+            } catch (e) { /* ignore */ }
+
+            VRMUtils.rotateVRM0(vrm);
+            this.scene.add(vrm.scene);
+            this.currentVrm = vrm;
+
+            // Bind VRM into Centralized AnimationManager
+            this.animationManager.bindVrm(vrm);
+
+            // Update humanoid skinning matrices immediately
+            if (this.currentVrm.humanoid) {
+              this.currentVrm.humanoid.update();
+            }
+            this.currentVrm.update(0.016);
+
+            this._onResize();
+            this.renderer.render(this.scene, this.camera);
+
+            if (typeof onProgress === 'function') {
+              onProgress(100, 100, 100);
+            }
+
+            console.log(`[VRM] Loaded successfully: ${url} (Meta Version: ${vrm.meta?.metaVersion || '0'})`);
+            resolve(vrm);
+          } catch (innerErr) {
+            console.error('[VRM] Error configuring loaded VRM model:', innerErr);
+            reject(innerErr);
+          }
         },
-        undefined,
-        (error) => reject(error)
+        (progress) => {
+          if (typeof onProgress === 'function' && progress) {
+            if (progress.total > 0) {
+              const pct = Math.min(99, Math.round((progress.loaded / progress.total) * 100));
+              onProgress(pct, progress.loaded, progress.total);
+            } else if (progress.loaded > 0) {
+              const estimatedTotal = 11 * 1024 * 1024;
+              const pct = Math.min(90, Math.round((progress.loaded / estimatedTotal) * 100));
+              onProgress(pct, progress.loaded, estimatedTotal);
+            }
+          }
+        },
+        (error) => {
+          console.error('[VRM] GLTFLoader error loading VRM:', error);
+          reject(error);
+        }
       );
     });
   }
 
-  setExpressionValue(name, value) {
-    if (this.currentVrm && this.currentVrm.expressionManager) {
-      this.currentVrm.expressionManager.setValue(name, value);
-    }
-  }
+  // --- Public API Forwarding to AnimationManager ---
 
-  /** Called from app.js whenever the server status changes, so idle motion
-   * can react — e.g. a subtle head-tilt "thinking" pose while waiting on
-   * Gemini, instead of the avatar looking frozen/dead during that gap. */
   setStatus(status) {
-    this.status = status;
-  }
-
-  /** Called from app.js with the emotion tag parsed out of Yumi's reply
-   * (e.g. "happy", "angry", "embarrassed"). Sets crossfade targets; the
-   * actual easing happens every frame in _updateEmotion() so expression
-   * changes fade in/out instead of popping instantly. */
-  setEmotion(emotionName) {
-    this.emotionTargets = EMOTION_PRESETS[emotionName] ?? EMOTION_PRESETS.neutral;
-
-    // Trigger a one-shot gesture + camera move only on an actual change,
-    // not every time a reply happens to repeat the same emotion.
-    if (emotionName !== this.lastGestureEmotion) {
-      this.lastGestureEmotion = emotionName;
-      this.activeGesturePose = GESTURE_POSES[emotionName] ?? null;
-      this.gestureStartTime = this.clock.elapsedTime;
-      this.cameraFovTarget = CAMERA_FOV_TARGETS[emotionName] ?? CAMERA_FOV_TARGETS.neutral;
-    }
-  }
-
-  _updateGesture() {
-    if (!this.currentVrm?.humanoid) return;
-
-    let envelope = 0;
-    if (this.activeGesturePose && this.gestureStartTime !== null) {
-      const elapsed = this.clock.elapsedTime - this.gestureStartTime;
-      const progress = elapsed / GESTURE_DURATION;
-      if (progress >= 1) {
-        this.activeGesturePose = null; // gesture finished
-      } else if (progress < 0.25) {
-        envelope = progress / 0.25; // ease in
-      } else if (progress < 0.7) {
-        envelope = 1; // hold
-      } else {
-        envelope = 1 - (progress - 0.7) / 0.3; // ease out
+    if (status === 'talking' || (this.lipSync && this.lipSync.isSpeaking)) {
+      this.animationManager.setState(CompanionState.TALKING);
+    } else if (status === 'listening') {
+      this.animationManager.setState(CompanionState.LISTENING);
+    } else if (status === 'thinking' || status === 'synthesizing_voice') {
+      this.animationManager.setState(CompanionState.THINKING);
+    } else if (status === 'idle') {
+      if (!this.lipSync || !this.lipSync.isSpeaking) {
+        this.animationManager.setState(CompanionState.IDLE);
       }
     }
+  }
 
-    // Arm bones are never touched by idle motion, and gestures only ever
-    // use head.x (idle only touches head.z for the "thinking" tilt), so
-    // every axis below can be set directly with no conflict/blending math
-    // needed against _updateIdleAnimation.
-    for (const boneName of GESTURE_BONE_NAMES) {
-      const bone = this.currentVrm.humanoid.getNormalizedBoneNode(boneName);
-      if (!bone) continue;
-      const targetAxes = this.activeGesturePose?.[boneName];
-      bone.rotation.x = (targetAxes?.x ?? 0) * envelope;
-      bone.rotation.y = (targetAxes?.y ?? 0) * envelope;
-      bone.rotation.z = (targetAxes?.z ?? 0) * envelope;
+  setEmotion(emotionName) {
+    this.animationManager.setEmotion(emotionName);
+  }
+
+  setExpressionValue(name, value) {
+    this.animationManager.setExpressionValue(name, value);
+  }
+
+  playGesture(poseName) {
+    this.animationManager.playGesture(poseName);
+  }
+
+  testEmotion(name) {
+    this.setEmotion(name);
+  }
+
+  testExpression(name, val = 1.0) {
+    this.setExpressionValue(name, val);
+  }
+
+  testGesture(name) {
+    this.playGesture(name);
+  }
+
+  getAvailableEmotions() {
+    return Object.keys(EMOTION_PRESETS);
+  }
+
+  getAvailableGestures() {
+    return Object.keys(GESTURE_EULER_POSES).filter((k) => k !== 'neutral');
+  }
+
+  get blinkEnabled() {
+    return this.animationManager.blinkEnabled;
+  }
+
+  set blinkEnabled(v) {
+    this.animationManager.blinkEnabled = Boolean(v);
+  }
+
+  get lookAtEnabled() {
+    return this.animationManager.lookAtEnabled;
+  }
+
+  set lookAtEnabled(v) {
+    this.animationManager.lookAtEnabled = Boolean(v);
+  }
+
+  // VRMA Loading API
+  async loadVrma(urlOrFile, customName = '') {
+    return await this.animationManager.loadVrma(urlOrFile, customName);
+  }
+
+  playAnimationClip(clipOrName, duration = 0.5) {
+    return this.animationManager.playAnimationClip(clipOrName, duration);
+  }
+
+  stopAnimationClip(duration = 0.4) {
+    this.animationManager.stopAnimationClip(duration);
+  }
+
+  getLoadedVrmaClips() {
+    return this.animationManager.getLoadedVrmaClips();
+  }
+
+  captureSnapshot(format = 'image/png', quality = 0.95) {
+    try {
+      this.renderer.render(this.scene, this.camera);
+      return this.canvas.toDataURL(format, quality);
+    } catch (e) {
+      console.error('Failed to capture VRM snapshot:', e);
+      return null;
     }
   }
 
-  _updateCameraDirector() {
-    this.camera.fov += (this.cameraFovTarget - this.camera.fov) * CAMERA_EASE_RATE;
-    this.camera.updateProjectionMatrix();
-  }
-
-  _updateEmotion() {
-    if (!this.currentVrm?.expressionManager) return;
-    for (const shape of EMOTION_SHAPE_NAMES) {
-      const target = this.emotionTargets[shape] ?? 0;
-      this.emotionCurrent[shape] += (target - this.emotionCurrent[shape]) * EMOTION_CROSSFADE_RATE;
-      this.currentVrm.expressionManager.setValue(shape, this.emotionCurrent[shape]);
-    }
-  }
-
-  _updateIdleAnimation(delta) {
-    if (!this.currentVrm) return;
-    const t = this.clock.elapsedTime;
-
-    const spine = this.currentVrm.humanoid?.getNormalizedBoneNode('spine');
-    const chest = this.currentVrm.humanoid?.getNormalizedBoneNode('chest');
-    const neck = this.currentVrm.humanoid?.getNormalizedBoneNode('neck');
-    const head = this.currentVrm.humanoid?.getNormalizedBoneNode('head');
-    const leftEye = this.currentVrm.humanoid?.getNormalizedBoneNode('leftEye');
-    const rightEye = this.currentVrm.humanoid?.getNormalizedBoneNode('rightEye');
-
-    // Natural breathing: gentle chest/spine oscillation, slightly out of
-    // phase so it doesn't read as a single robotic sine wave.
-    if (spine) spine.rotation.x = Math.sin(t * 1.2) * 0.015;
-    if (chest) chest.rotation.x = Math.sin(t * 1.2 + 0.3) * 0.01;
-
-    // Gentle head sway so she never looks like a frozen render.
-    if (neck) {
-      neck.rotation.y = Math.sin(t * 0.35) * 0.05;
-      neck.rotation.z = Math.sin(t * 0.5 + 1.0) * 0.02;
-    }
-
-    // "Thinking" pose: subtle head tilt + downward-ish gaze while waiting
-    // on a Gemini/TTS round trip, so the wait itself reads as an expression
-    // instead of dead air.
-    const thinking = this.status === 'thinking' || this.status === 'synthesizing_voice';
-    if (head) {
-      const targetTiltZ = thinking ? 0.12 : 0;
-      head.rotation.z += (targetTiltZ - head.rotation.z) * 0.05;
-    }
-
-    // Saccades: eyes dart to a new small random target periodically instead
-    // of staring dead ahead, then smoothly ease toward that target every
-    // frame (this is what actually sells "alive" on a static idle avatar).
-    this.saccadeTimer += delta;
-    if (this.saccadeTimer >= this.nextSaccadeAt) {
-      this.lookTarget = {
-        x: (Math.random() - 0.5) * (thinking ? 0.12 : 0.35),
-        y: (Math.random() - 0.5) * 0.2 + (thinking ? -0.15 : 0),
-      };
-      this.saccadeTimer = 0;
-      this.nextSaccadeAt = thinking ? 2.5 + Math.random() * 2 : 1.2 + Math.random() * 2.2;
-    }
-    this.currentLook.x += (this.lookTarget.x - this.currentLook.x) * 0.08;
-    this.currentLook.y += (this.lookTarget.y - this.currentLook.y) * 0.08;
-
-    if (leftEye) {
-      leftEye.rotation.y = this.currentLook.x;
-      leftEye.rotation.x = this.currentLook.y;
-    }
-    if (rightEye) {
-      rightEye.rotation.y = this.currentLook.x;
-      rightEye.rotation.x = this.currentLook.y;
-    }
-
-    // Eye blinking on a randomized timer via VRM expression "blink".
-    this.blinkTimer += delta;
-    if (this.blinkTimer >= this.nextBlinkAt) {
-      this._triggerBlink();
-      this.blinkTimer = 0;
-      this.nextBlinkAt = 2.5 + Math.random() * 4;
-    }
-  }
-
-  _triggerBlink() {
-    if (!this.currentVrm?.expressionManager) return;
-    const mgr = this.currentVrm.expressionManager;
-    let progress = 0;
-    const blinkDurationMs = 120;
-    const start = performance.now();
-
-    const step = () => {
-      const elapsed = performance.now() - start;
-      progress = Math.min(elapsed / blinkDurationMs, 1);
-      const value = progress < 0.5 ? progress * 2 : (1 - progress) * 2;
-      mgr.setValue('blink', value);
-      if (progress < 1) requestAnimationFrame(step);
-      else mgr.setValue('blink', 0);
-    };
-    requestAnimationFrame(step);
-  }
+  // --- Unified Animation Render Loop ---
 
   _animate() {
     requestAnimationFrame(() => this._animate());
-    const delta = this.clock.getDelta();
 
-    this._updateIdleAnimation(delta);
-    this._updateEmotion();
-    this._updateGesture();
-    this._updateCameraDirector();
-    this.controls.update();
-    if (this.currentVrm) this.currentVrm.update(delta);
+    if (this.canvas.style.display === 'none') {
+      return;
+    }
 
-    this.renderer.render(this.scene, this.camera);
+    try {
+      const delta = Math.min(this.clock.getDelta(), 0.045);
+
+      // 1. Centralized Animation Engine (States, Respiration, LookAt, Blinking, Gestures, Visemes, Springbones)
+      if (this.animationManager) {
+        this.animationManager.update(delta);
+      }
+
+      // 2. Camera Framing Director & OrbitControls
+      this._updateCamera(delta);
+      this.controls.update();
+
+      // 3. WebGL Render
+      this.renderer.render(this.scene, this.camera);
+    } catch (animErr) {
+      console.error('[VRM Animate Error]:', animErr);
+    }
   }
 }

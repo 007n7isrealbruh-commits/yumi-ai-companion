@@ -1,24 +1,29 @@
-// Maps live audio frequency/volume data onto VRM viseme expressions
-// (aa, ih, ou, ee, oh — the standard VRM 1.0 mouth-shape presets).
-//
-// v2: five-band mapping instead of three (so "ih"/"oh" actually get used),
-// plus an attack/release envelope per shape so the mouth doesn't snap
-// instantly between shapes every animation frame — that snapping is what
-// makes lip sync look like flappy "puppet mouth" instead of speech.
+/**
+ * frontend/js/lipSync.js
+ * Synchronized VRM viseme lip-sync engine.
+ * 
+ * Upgrades:
+ * - Removed private requestAnimationFrame loop to prevent tick desynchronization
+ *   and mouth-tearing. Driven directly by VrmManager._animate(delta).
+ * - Multi-band spectral decomposition (aa, ih, ou, ee, oh).
+ * - Delta-scaled exponential attack/release envelope for fluid mouth articulation.
+ * - Live audio level telemetry export (for HUD equalizer bars).
+ */
 
 const VISEME_SHAPES = ['aa', 'ih', 'ou', 'ee', 'oh'];
-const ATTACK = 0.55;  // how fast a shape opens toward its target (0..1 per frame)
-const RELEASE = 0.25; // how fast a shape closes back toward 0 (0..1 per frame)
+const ATTACK_RATE = 28.0;   // Hz: fast natural mouth opening
+const RELEASE_RATE = 14.0;  // Hz: smooth natural mouth closure
 
 export class LipSync {
   constructor(audioElement, vrmManager) {
     this.audioElement = audioElement;
     this.vrmManager = vrmManager;
 
-    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    this.audioContext = new AudioCtx();
     this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 1024;
-    this.analyser.smoothingTimeConstant = 0.6;
+    this.analyser.fftSize = 512;
+    this.analyser.smoothingTimeConstant = 0.55;
 
     this.sourceNode = this.audioContext.createMediaElementSource(this.audioElement);
     this.sourceNode.connect(this.analyser);
@@ -27,10 +32,12 @@ export class LipSync {
     this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
     this.isSpeaking = false;
 
-    // Current eased value per viseme shape, so we can lerp toward targets.
+    // Smoothed viseme values
     this.currentValues = Object.fromEntries(VISEME_SHAPES.map((s) => [s, 0]));
-
-    this._loop();
+    
+    // Live audio telemetry
+    this.currentVolume = 0;
+    this.bandLevels = [0, 0, 0, 0];
   }
 
   async resumeContext() {
@@ -53,44 +60,68 @@ export class LipSync {
       this.currentValues[shape] = 0;
       this.vrmManager.setExpressionValue(shape, 0);
     });
+    this.currentVolume = 0;
+    this.bandLevels = [0, 0, 0, 0];
   }
 
-  _loop() {
-    requestAnimationFrame(() => this._loop());
-
+  /**
+   * Called every frame from VrmManager._animate(delta) for lockstep sync.
+   */
+  update(delta) {
     if (!this.isSpeaking) {
-      // Ease every shape back to 0 instead of hard-cutting, even after
-      // stop() — avoids a visible "jaw snap shut" at the end of a line.
+      // Smoothly return mouth to neutral position
+      let active = false;
       for (const shape of VISEME_SHAPES) {
-        if (this.currentValues[shape] > 0.001) {
-          this.currentValues[shape] += (0 - this.currentValues[shape]) * RELEASE;
+        if (this.currentValues[shape] > 0.005) {
+          const decay = 1 - Math.exp(-RELEASE_RATE * delta);
+          this.currentValues[shape] += (0 - this.currentValues[shape]) * decay;
           this.vrmManager.setExpressionValue(shape, this.currentValues[shape]);
+          active = true;
+        } else if (this.currentValues[shape] !== 0) {
+          this.currentValues[shape] = 0;
+          this.vrmManager.setExpressionValue(shape, 0);
         }
       }
-      return;
+      this.currentVolume = 0;
+      this.bandLevels = [0, 0, 0, 0];
+      return active;
     }
 
     this.analyser.getByteFrequencyData(this.frequencyData);
 
-    // Five bands across the spectrum -> five viseme targets, so quieter
-    // consonant-like bands ("ih", "oh") actually get a turn instead of the
-    // mouth only ever toggling between three wide-open shapes.
     const bands = this._splitBands(this.frequencyData, VISEME_SHAPES.length);
-    const volume = this._rms(this.frequencyData) / 255; // 0..1
-    const openAmount = Math.min(1, volume * 2.2);
+    const volume = this._rms(this.frequencyData) / 255;
+    this.currentVolume = volume;
 
+    // 4-band telemetry for HUD equalizer bars
+    const eqBands = this._splitBands(this.frequencyData, 4);
+    const maxB = 255;
+    this.bandLevels = eqBands.map((b) => Math.min(1, b / (maxB * 0.8)));
+
+    const openAmount = Math.min(1.0, Math.pow(volume * 2.4, 1.15));
     const bandTotal = bands.reduce((a, b) => a + b, 0) || 1;
 
     for (let i = 0; i < VISEME_SHAPES.length; i++) {
       const shape = VISEME_SHAPES[i];
-      const bandWeight = bands[i] / bandTotal; // this shape's share of energy
-      const target = openAmount < 0.04 ? 0 : openAmount * bandWeight * VISEME_SHAPES.length * 0.6;
-      const clampedTarget = Math.max(0, Math.min(1, target));
+      const bandShare = bands[i] / bandTotal;
+      const target = openAmount < 0.03 ? 0 : Math.min(1.0, openAmount * bandShare * 3.8);
 
-      const rate = clampedTarget > this.currentValues[shape] ? ATTACK : RELEASE;
-      this.currentValues[shape] += (clampedTarget - this.currentValues[shape]) * rate;
+      const rate = target > this.currentValues[shape] ? ATTACK_RATE : RELEASE_RATE;
+      const ease = 1 - Math.exp(-rate * delta);
+      this.currentValues[shape] += (target - this.currentValues[shape]) * ease;
+      
       this.vrmManager.setExpressionValue(shape, this.currentValues[shape]);
     }
+
+    return true;
+  }
+
+  getAudioLevels() {
+    return {
+      isSpeaking: this.isSpeaking,
+      volume: this.currentVolume,
+      bands: this.bandLevels,
+    };
   }
 
   _splitBands(data, bandCount) {

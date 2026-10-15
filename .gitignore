@@ -3,6 +3,8 @@
 
 # Personal memory/conversation data — don't share your own chat history
 backend/memory_store.json
+backend/tasks_store.json
+backend/timers_store.json
 
 # Python
 __pycache__/

@@ -8,6 +8,10 @@ python-dotenv==1.2.2
 # client.models.embed_content API this project uses (system_instruction,
 # GenerateContentConfig, EmbedContentConfig) — pin a current 1.x release.
 google-genai==1.74.0
+# Powers every non-Gemini "brain" provider (OpenAI, Groq, NVIDIA NIM,
+# Ollama, LM Studio, DeepSeek, xAI, custom) — they're all OpenAI-compatible
+# endpoints, so one client library covers all of them.
+openai==1.99.1
 requests==2.32.3
 SpeechRecognition==3.10.4
 PyAudio==0.2.14

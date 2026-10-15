@@ -21,8 +21,13 @@ keyword+recency scoring (see MemoryManager.get_relevant_facts).
 import math
 from typing import List, Optional
 
-from google.genai import types
-from backend.gemini_client import client
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
+from backend.config import settings
+from backend.gemini_client import get_client, gemini_available
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 # Truncated (Matryoshka) output instead of the full-size vector: plenty of
@@ -33,17 +38,36 @@ EMBEDDING_DIMENSIONS = 768
 
 def embed_text(text: str) -> Optional[List[float]]:
     text = (text or "").strip()
-    if not text:
-        return None
+    if not text or not gemini_available():
+        return None  # no key configured
+    key = settings.gemini_api_key.strip()
+    if types is not None:
+        try:
+            response = get_client().models.embed_content(
+                model=EMBEDDING_MODEL,
+                contents=text,
+                config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS),
+            )
+            return list(response.embeddings[0].values)
+        except Exception as e:
+            print(f"[EMBEDDINGS] SDK embed_text failed ({e}), falling back to REST...")
+
+    # Direct REST fallback (requires no SDK)
     try:
-        response = client.models.embed_content(
-            model=EMBEDDING_MODEL,
-            contents=text,
-            config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS),
-        )
-        return list(response.embeddings[0].values)
+        import requests
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent?key={key}"
+        payload = {
+            "model": f"models/{EMBEDDING_MODEL}",
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": EMBEDDING_DIMENSIONS,
+        }
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("embedding", {}).get("values")
+        return None
     except Exception as e:
-        print(f"[EMBEDDINGS] embed_text failed, falling back to keyword scoring: {e}")
+        print(f"[EMBEDDINGS] REST embed_text failed, falling back to keyword scoring: {e}")
         return None
 
 

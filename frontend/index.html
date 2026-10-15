@@ -1,99 +1,1128 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Yumi — AI Waifu Companion</title>
-<link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Yumi — AI Companion &amp; Virtual Vessel</title>
+  
+  <!-- Premium Fonts: Plus Jakarta Sans (UI) & Outfit (Display) & JetBrains Mono (Code/Diagnostics) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
-<body data-bg="studio">
+<body data-avatar-bg="studio">
   <div id="app">
+    <!-- 3D WebGL Avatar Viewport -->
     <canvas id="scene-canvas"></canvas>
+    <!-- 2.5D Live2D Avatar Viewport -->
+    <canvas id="live2d-canvas" style="display:none; position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:auto;"></canvas>
+    
+    <!-- Ambient Scene Grid / Light Overlay (Cosmetic Utsuwa depth) -->
+    <div class="ambient-glow"></div>
 
-    <!-- Top-right corner: settings gear -->
-    <button id="settings-toggle" class="corner-btn" title="Settings" aria-label="Settings">⚙️</button>
-
-    <!-- Small always-visible status pill, top-left -->
-    <div id="status-pill">
-      <span id="char-name">Yumi</span>
-      <span id="affection-dot" title="Affection"></span>
-      <span id="affection-value">0</span>
+    <!-- 3D Avatar Loading Indicator / Overlay -->
+    <div id="avatar-loader" class="avatar-loader">
+      <div class="loader-content">
+        <button type="button" class="loader-close-btn" id="avatar-loader-close-btn" title="Dismiss overlay" aria-label="Close">✕</button>
+        <div class="loader-spinner"></div>
+        <div class="loader-meta">
+          <span class="loader-title" id="avatar-loader-title">Awakening Yumi...</span>
+          <span class="loader-detail" id="avatar-loader-detail">Preparing 3D neural vessel</span>
+        </div>
+        <div class="loader-bar-track">
+          <div class="loader-bar-fill" id="avatar-loader-fill" style="width: 15%;"></div>
+        </div>
+        <div class="loader-actions hidden" id="avatar-loader-actions">
+          <button type="button" class="glass-pill-btn" id="avatar-retry-btn">Retry 3D</button>
+          <button type="button" class="glass-pill-btn" id="avatar-fallback-btn">Use 2.5D Live2D</button>
+        </div>
+      </div>
     </div>
 
-    <!-- Caption — appears synced with her voice, fades in/out -->
-    <div id="caption-box" class="hidden">
-      <p id="caption-text"></p>
-    </div>
-
-    <!-- Bottom floating pill bar -->
-    <div id="input-bar" class="hidden-obs">
-      <button id="attach-btn" class="pill-icon-btn" title="Attach / vision">+</button>
-      <form id="text-form" autocomplete="off">
-        <input id="text-input" type="text" placeholder="Type a message..." />
-      </form>
-      <button id="mic-toggle" class="pill-icon-btn" title="Mic">🎤</button>
-    </div>
-
-    <!-- "+" popover: VRM upload, screen share, webcam -->
-    <div id="attach-menu" class="popover hidden">
-      <label class="popover-item">
-        📁 Upload VRM model
-        <input id="vrm-upload" type="file" accept=".vrm" hidden />
-      </label>
-      <button id="screen-share-toggle" class="popover-item" type="button">🖥️ Screen share: off</button>
-      <button id="webcam-toggle" class="popover-item" type="button">📷 Webcam: off</button>
-    </div>
-
-    <!-- Settings drawer -->
-    <div id="settings-drawer" class="drawer hidden-obs hidden">
-      <div class="drawer-header">
-        <h2>Settings</h2>
-        <button id="settings-close" class="corner-btn small">✕</button>
+    <!-- ============================================================
+         TOP FLOATING HUD
+         Left: Companion Status Pill & Relationship Heart
+         Right: Action Island (History, Diary, OBS mode, Settings)
+         ============================================================ -->
+    <header class="hud-top">
+      <!-- Status Pill / Companion Card -->
+      <div id="status-pill" class="glass-pill hud-card">
+        <div class="avatar-ring">
+          <span class="live-dot" title="Connected to neural core"></span>
+        </div>
+        <div class="status-meta">
+          <div class="char-header">
+            <span id="char-name">Yumi</span>
+            <span id="relationship-tier-pill" class="mini-pill">Stranger</span>
+          </div>
+          <div class="heart-meter" title="Affection Level">
+            <svg class="heart-icon" viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+            </svg>
+            <span id="affection-dot" class="sr-only"></span>
+            <span id="affection-value" class="heart-count">0</span>
+          </div>
+        </div>
       </div>
 
-      <section class="drawer-section">
-        <h3>Background</h3>
-        <div class="radio-row">
-          <label><input type="radio" name="bg-mode" value="studio" /> Studio (default)</label>
-          <label><input type="radio" name="bg-mode" value="white" /> Plain white</label>
-          <label><input type="radio" name="bg-mode" value="transparent" /> Transparent (pet / OBS overlay)</label>
+      <!-- Action Island -->
+      <div class="hud-actions">
+        <!-- Live Avatar Tester Button -->
+        <button id="tester-toggle-btn" class="glass-btn icon-btn" title="Live Expression &amp; Emotion Tester" aria-label="Avatar Tester">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+            <line x1="9" y1="9" x2="9.01" y2="9"></line>
+            <line x1="15" y1="9" x2="15.01" y2="9"></line>
+          </svg>
+        </button>
+
+        <!-- Chat History Button -->
+        <button id="history-toggle" class="glass-btn icon-btn" title="Chat History" aria-label="Chat History">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+        </button>
+
+        <!-- Quick Diary Button -->
+        <button id="diary-quick-btn" class="glass-btn icon-btn" title="Companion Diary" aria-label="Companion Diary">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+        </button>
+
+        <!-- Camera Framing Preset Button -->
+        <button id="camera-toggle-btn" class="glass-btn icon-btn" title="Cycle Camera Framing (Portrait / Waist / Full)" aria-label="Camera Framing">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+        </button>
+
+        <!-- Clean / OBS Mode Toggle -->
+        <button id="obs-quick-btn" class="glass-btn icon-btn" title="Toggle Clean Overlay (OBS Mode)" aria-label="Toggle Clean Mode">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+          </svg>
+        </button>
+
+        <!-- Settings / Options Button -->
+        <button id="settings-toggle" class="glass-btn icon-btn" title="Settings &amp; Options" aria-label="Settings and Options">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Companion VN Dialogue Box (Subtitles) - Her spoken captions on main screen -->
+    <div id="caption-box" class="glass-dialogue hidden">
+      <div class="dialogue-header">
+        <div class="speaker-info">
+          <span class="speaker-sparkle">🌸</span>
+          <span id="char-name-caption" class="speaker-name">Yumi</span>
+          <span id="caption-emotion" class="emotion-tag">✨ Neutral</span>
         </div>
-        <p class="hint">Transparent mode drops the background entirely — pair it with the desktop overlay
-          window (see electron/) or an OBS browser source with alpha support.</p>
-      </section>
+        <div class="dialogue-audio-indicator" title="Speaking">
+          <span class="bar bar-1"></span>
+          <span class="bar bar-2"></span>
+          <span class="bar bar-3"></span>
+        </div>
+      </div>
+      <p id="caption-text" class="dialogue-body"></p>
+    </div>
 
-      <section class="drawer-section">
-        <h3>Character</h3>
-        <label class="field-label">Name
-          <input id="setting-character-name" type="text" />
-        </label>
-        <label class="field-label">Fish Audio voice reference ID
-          <input id="setting-voice-id" type="text" placeholder="leave blank for default voice" />
-        </label>
-        <button id="settings-save" class="primary-btn" type="button">Save</button>
-        <p id="settings-save-status" class="hint"></p>
-      </section>
+    <!-- The User Messaging Box: Floating Glass Composer Capsule -->
+    <div id="input-bar" class="glass-composer">
+      <!-- Attachment / Vision Menu Button -->
+      <button id="attach-btn" class="composer-btn attach-btn" type="button" title="Tools &amp; Quick Prompts" aria-label="Tools and Quick Prompts">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
 
-      <section class="drawer-section">
-        <h3>Memory</h3>
-        <p class="hint">She decides what's worth remembering herself — nothing here expires automatically.
-          Delete anything you don't want her to keep.</p>
-        <ul id="memory-list"></ul>
-      </section>
+      <!-- Text Input Form -->
+      <form id="text-form" class="composer-form" autocomplete="off">
+        <input id="text-input" type="text" placeholder="Message Yumi, or click mic to speak..." />
+        <button id="send-btn" class="send-btn" type="submit" title="Send message" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
 
-      <section class="drawer-section">
-        <h3>Diary</h3>
-        <button id="write-diary-btn" class="primary-btn" type="button">Write a diary entry now</button>
-        <ul id="diary-list"></ul>
-      </section>
+      <!-- Microphone VAD Toggle (Default Muted / OFF) -->
+      <button id="mic-toggle" class="composer-btn mic-btn muted" type="button" title="Microphone is OFF — Click to turn ON voice input" aria-label="Toggle Microphone">
+        <div class="mic-radar"></div>
+        <!-- Active mic icon (shown when listening) -->
+        <svg class="mic-icon mic-active-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+        <!-- Muted mic icon with slash (shown when off / muted) -->
+        <svg class="mic-icon mic-muted-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="2" y1="2" x2="22" y2="22"></line>
+          <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path>
+          <path d="M5 10v2a7 7 0 0 0 12 5"></path>
+          <path d="M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+          <path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </button>
+    </div>
 
-      <section class="drawer-section">
-        <h3>Usage this session</h3>
-        <ul id="usage-list" class="usage-list"></ul>
-      </section>
+    <!-- Attach Popover Menu -->
+    <div id="attach-menu" class="popover-menu hidden">
+      <div class="popover-heading">Quick Prompts</div>
+      <div id="interaction-sparks" class="popover-sparks-grid" role="toolbar" aria-label="Conversation Sparks">
+        <button type="button" class="spark-chip" data-spark="pat">🌸 Headpat</button>
+        <button type="button" class="spark-chip" data-spark="compliment">💖 Compliment</button>
+        <button type="button" class="spark-chip" data-spark="mood">☕ How are you?</button>
+        <button type="button" class="spark-chip" data-spark="weather">🌤️ Weather &amp; Time</button>
+        <button type="button" class="spark-chip" data-spark="secret">✨ Secret Thought</button>
+        <button type="button" class="spark-chip" data-spark="task">📝 Today's Tasks</button>
+      </div>
+
+      <div class="popover-heading">Interactive Tools</div>
+      <label class="popover-item">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+          <line x1="12" y1="22.08" x2="12" y2="12"></line>
+        </svg>
+        <span>Upload VRM Model</span>
+        <input id="vrm-upload" type="file" accept=".vrm" hidden />
+      </label>
+      <button id="screen-share-toggle" class="popover-item" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        <span>Screen Share: off</span>
+      </button>
+      <button id="webcam-toggle" class="popover-item" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <span>Webcam: off</span>
+      </button>
+      <label class="popover-item">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <span>Take Photo with Camera</span>
+        <input id="camera-photo-input" type="file" accept="image/*" capture="environment" hidden />
+      </label>
+      <button id="snapshot-btn" class="popover-item" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <span>Avatar Snapshot</span>
+      </button>
+    </div>
+
+    <!-- ============================================================
+         LIVE AVATAR EXPRESSION & ANIMATION TESTER PALETTE
+         ============================================================ -->
+    <div id="live-tester-window" class="floating-palette hidden">
+      <div class="palette-header">
+        <div class="palette-title">
+          <span class="sparkle">✦</span>
+          <span>Live Avatar Tester</span>
+        </div>
+        <button id="tester-close-btn" class="icon-btn-subtle" title="Close Tester">✕</button>
+      </div>
+      <div class="palette-body">
+        <div class="palette-section">
+          <div class="palette-label">Avatar Mode</div>
+          <div class="palette-chips">
+            <button type="button" class="palette-chip active" data-avatar-type="vrm">3D VRM</button>
+            <button type="button" class="palette-chip" data-avatar-type="live2d">2.5D Live2D</button>
+          </div>
+        </div>
+        <div class="palette-section">
+          <div class="palette-label">Emotions</div>
+          <div class="palette-chips">
+            <button type="button" class="palette-chip" data-test-emo="neutral">😐 Neutral</button>
+            <button type="button" class="palette-chip" data-test-emo="happy">😊 Happy</button>
+            <button type="button" class="palette-chip" data-test-emo="embarrassed">😳 Embarrassed</button>
+            <button type="button" class="palette-chip" data-test-emo="angry">😠 Angry</button>
+            <button type="button" class="palette-chip" data-test-emo="sad">😢 Sad</button>
+            <button type="button" class="palette-chip" data-test-emo="surprised">😲 Surprised</button>
+          </div>
+        </div>
+        <div class="palette-section">
+          <div class="palette-label">Gestures &amp; States</div>
+          <div class="palette-chips">
+            <button type="button" class="palette-chip" data-test-gesture="wave">👋 Wave</button>
+            <button type="button" class="palette-chip" data-test-gesture="thinking">🤔 Thinking</button>
+            <button type="button" class="palette-chip" data-test-state="talking">🗣️ Talking</button>
+            <button type="button" class="palette-chip" data-test-state="idle">🧘 Idle</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CHAT HISTORY DRAWER (Docked / Slide-out Panel)
+         Directly hooks up with app.js's historyList!
+         ============================================================ -->
+    <aside id="history-drawer" class="side-drawer hidden">
+      <div class="side-drawer-header">
+        <div class="drawer-title-group">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <h3>Conversation History</h3>
+        </div>
+        <div class="drawer-header-actions">
+          <button id="clear-history-quick" class="icon-btn-subtle" title="Clear conversation history">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+          <button id="history-close" class="icon-btn-subtle" title="Close drawer">✕</button>
+        </div>
+      </div>
+      <div class="side-drawer-body">
+        <ul id="history-list"></ul>
+      </div>
+      <div class="side-drawer-footer">
+        <form id="drawer-chat-form" class="drawer-chat-form" autocomplete="off">
+          <input id="drawer-chat-input" type="text" placeholder="Type a message to Yumi..." />
+          <button id="drawer-send-btn" class="drawer-send-btn" type="submit" title="Send message" aria-label="Send">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <!-- ============================================================
+         SETTINGS DRAWER (High-End Cyberpunk / Glassmorphic Terminal)
+         ============================================================ -->
+    <div id="settings-drawer" class="drawer hidden-obs hidden">
+      <div class="drawer-header">
+        <div class="drawer-branding">
+          <span class="brand-sparkle">✦</span>
+          <h2>System Preferences</h2>
+          <span class="version-tag">Core v2.4</span>
+        </div>
+        <button id="settings-close" class="icon-btn-subtle" title="Close Settings">✕</button>
+      </div>
+
+      <div class="drawer-body">
+        <!-- Sidebar Navigation -->
+        <nav class="settings-nav">
+          <button class="settings-nav-item active" data-panel="panel-character">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            <span>Persona &amp; Mood</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-brain">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
+            <span>LLM Brain Engine</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-voice">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+            <span>Spoken Voice (TTS)</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-stt">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+            <span>Speech &amp; VAD</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-memory">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+            <span>Memory &amp; Data</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-tasks">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            <span>Tasks &amp; Alarms</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-diary">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            <span>Private Diary</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-vrm">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+            <span>3D Model &amp; Emotes</span>
+          </button>
+          <button class="settings-nav-item" data-panel="panel-dev">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+            <span>Diagnostics</span>
+          </button>
+        </nav>
+
+        <!-- Panels Container -->
+        <div class="settings-content">
+          <!-- 1. Character & Personality -->
+          <section id="panel-character" class="settings-panel active">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Relationship Dynamic</span>
+                <span class="badge tier-badge">Tier: <strong id="relationship-tier-label">Stranger</strong></span>
+              </div>
+              <p class="hint">Your relationship level evolves naturally as you spend time chatting and confiding in each other.</p>
+              <ul id="relationship-stats" class="stats-grid"></ul>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Identity &amp; Persona</span>
+              </div>
+              <div class="form-group">
+                <label for="setting-character-name">Companion Name</label>
+                <input id="setting-character-name" class="settings-field" type="text" placeholder="Yumi" />
+              </div>
+
+              <div class="form-group">
+                <label>Archetype Presets</label>
+                <div class="preset-chips small">
+                  <button type="button" class="chip-btn-sm" data-preset="tsundere">🌸 Tsundere</button>
+                  <button type="button" class="chip-btn-sm" data-preset="sweet">💖 Sweet &amp; Caring</button>
+                  <button type="button" class="chip-btn-sm" data-preset="gamer">🎮 Sarcastic Gamer</button>
+                  <button type="button" class="chip-btn-sm" data-preset="calm">☕ Calm Philosopher</button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="setting-personality-text">Custom Persona Instructions</label>
+                <textarea id="setting-personality-text" class="settings-field" rows="3" placeholder="Describe her tone, quirks, speech style, or background story..."></textarea>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Atmosphere &amp; Backdrop</span>
+              </div>
+              <div class="radio-segment">
+                <label class="segment-option">
+                  <input type="radio" name="bg-mode" value="studio" />
+                  <span>Studio Dark</span>
+                </label>
+                <label class="segment-option">
+                  <input type="radio" name="bg-mode" value="dark" />
+                  <span>Dark Mode</span>
+                </label>
+                <label class="segment-option">
+                  <input type="radio" name="bg-mode" value="white" />
+                  <span>Clean White</span>
+                </label>
+                <label class="segment-option">
+                  <input type="radio" name="bg-mode" value="transparent" />
+                  <span>Transparent (OBS)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Feature 2: Proactive Living Initiative -->
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Proactive Living Initiative</span>
+                <span class="badge tier-badge">Neuro-Sama Mode</span>
+              </div>
+              <p class="hint">Allow Yumi to autonomously initiate conversations, check in on your study/tasks, or break long silences.</p>
+              <div class="toggle-row">
+                <div>
+                  <div class="toggle-label">Autonomous Idle Check-ins</div>
+                  <div class="hint">Yumi chimes in naturally when the room is quiet.</div>
+                </div>
+                <label class="switch">
+                  <input id="setting-proactive-toggle" type="checkbox" checked />
+                  <span class="slider-toggle"></span>
+                </label>
+              </div>
+              <div class="form-group" style="margin-top:12px;">
+                <label for="setting-proactive-interval">Silence Threshold</label>
+                <select id="setting-proactive-interval" class="settings-field">
+                  <option value="60">⚡ 1 Minute (Very Active)</option>
+                  <option value="120" selected>🌸 2 Minutes (Balanced)</option>
+                  <option value="300">☕ 5 Minutes (Relaxed)</option>
+                  <option value="600">🌙 10 Minutes (Occasional)</option>
+                </select>
+              </div>
+              <div style="margin-top:10px;">
+                <button id="nudge-companion-btn" class="secondary-btn" type="button" style="width:100%;">👉 Poke / Nudge Yumi</button>
+              </div>
+            </div>
+
+            <!-- Feature 4: OBS & Desktop Pet Integration -->
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">OBS Studio &amp; Desktop Companion</span>
+              </div>
+              <p class="hint">Use Yumi as a transparent live stream overlay or floating desktop companion:</p>
+              <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+                <div style="display:flex; gap:8px;">
+                  <button id="enter-obs-mode-btn" class="secondary-btn" type="button" style="flex:1;">🎥 Toggle Clean OBS Mode</button>
+                  <button id="copy-obs-url-btn" class="secondary-btn" type="button" style="flex:1;">📋 Copy OBS URL</button>
+                </div>
+                <p class="hint" style="font-size:12px;">Add as an OBS Browser Source: <code>http://localhost:5500/?obs=1</code> (enable transparent background).</p>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button id="settings-save" class="primary-btn glow-btn" type="button">Save Character</button>
+              <p id="settings-save-status" class="hint"></p>
+            </div>
+          </section>
+
+          <!-- 2. LLM Brain -->
+          <section id="panel-brain" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Intelligence Provider</span>
+                <span id="provider-badges"></span>
+              </div>
+              <p id="provider-desc" class="hint">Select which cloud model or local AI engine powers her personality.</p>
+              
+              <div class="form-group">
+                <label for="setting-llm-provider">Active Provider</label>
+                <select id="setting-llm-provider" class="settings-field"></select>
+              </div>
+
+              <div class="form-group">
+                <label for="setting-llm-model">Model Name</label>
+                <input id="setting-llm-model" class="settings-field" type="text" placeholder="e.g. gemini-3.8-flash" />
+                <span id="provider-model-hint" class="hint">Exact model identifier string.</span>
+              </div>
+
+              <div class="form-group" id="row-llm-api-key">
+                <label for="setting-llm-api-key">API Key</label>
+                <input id="setting-llm-api-key" class="settings-field" type="password" placeholder="sk-..." />
+                <span class="hint">Saved securely in server process memory — never exposed to the client.</span>
+              </div>
+
+              <div class="form-group" id="row-llm-base-url">
+                <label for="setting-llm-base-url">Endpoint Base URL</label>
+                <input id="setting-llm-base-url" class="settings-field" type="text" placeholder="http://localhost:11434/v1" />
+                <span class="hint">Required for local runtimes (Ollama, LM Studio, Kobold, vLLM).</span>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Generation Parameters</span>
+              </div>
+
+              <div class="form-group">
+                <div class="slider-header">
+                  <label for="setting-llm-temp">Creativity (Temperature)</label>
+                  <span id="temp-display" class="slider-value">0.9</span>
+                </div>
+                <input id="setting-llm-temp" class="custom-range" type="range" min="0.1" max="1.5" step="0.05" value="0.9" />
+              </div>
+
+              <div class="form-group">
+                <label for="setting-llm-tokens">Max Reply Tokens</label>
+                <input id="setting-llm-tokens" class="settings-field" type="number" min="50" max="2048" step="25" value="200" />
+                <span class="hint">Controls reply conciseness (keeps conversation natural and rapid).</span>
+              </div>
+
+              <div class="form-group" id="row-gemini-search">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-label">Live Google Web Search</div>
+                    <div class="hint">Allows her to browse live news and information (Gemini only).</div>
+                  </div>
+                  <label class="switch">
+                    <input id="setting-gemini-search" type="checkbox" checked />
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button id="settings-save-brain" class="primary-btn glow-btn" type="button">Save &amp; Switch Brain</button>
+              <p id="settings-brain-status" class="hint"></p>
+            </div>
+          </section>
+
+          <!-- 3. Voice (TTS) -->
+          <section id="panel-voice" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Speech Synthesis Provider</span>
+              </div>
+
+              <div class="form-group">
+                <label for="setting-tts-provider">Voice Engine</label>
+                <select id="setting-tts-provider" class="settings-field">
+                  <option value="fish_audio">Fish Audio (High-speed anime voices)</option>
+                  <option value="elevenlabs">ElevenLabs (Lifelike expressive voices)</option>
+                  <option value="browser">Browser Speech (Zero keys / offline)</option>
+                  <option value="off">Muted (Captions only)</option>
+                </select>
+              </div>
+
+              <!-- Fish Audio Settings -->
+              <div id="section-fish-audio">
+                <div class="form-group">
+                  <label for="setting-fish-key">Fish Audio API Key</label>
+                  <input id="setting-fish-key" class="settings-field" type="password" placeholder="leave blank to keep current" />
+                </div>
+                <div class="form-group">
+                  <label for="setting-fish-model">Fish Audio Model</label>
+                  <select id="setting-fish-model" class="settings-field">
+                    <option value="s2.1-pro-free" selected>s2.1-pro-free (Free Fast Tier — Recommended)</option>
+                    <option value="s2.1-pro">s2.1-pro (Fish Audio s2.1 Pro — High Fidelity)</option>
+                    <option value="s2.1">s2.1 (Fish Audio s2.1 Standard)</option>
+                    <option value="s1">s1 (Fish Audio s1 Legacy)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Curated Anime Voice Presets</label>
+                  <div class="preset-chips small" id="fish-voice-presets">
+                    <button type="button" class="chip-btn-sm active" data-voice="">Default Yumi</button>
+                    <button type="button" class="chip-btn-sm" data-voice="8ef4a238714b45718ce04243307c57a7">Sweet Anime</button>
+                    <button type="button" class="chip-btn-sm" data-voice="54a520fa49d0411184968fb9ef9fa484">Tsundere</button>
+                    <button type="button" class="chip-btn-sm" data-voice="e1b827e7049842a2976ff98d575c3ef9">Gentle Soft</button>
+                  </div>
+                  <input id="setting-voice-id" class="settings-field" type="text" placeholder="Custom voice reference ID (optional)" />
+                </div>
+              </div>
+
+              <!-- ElevenLabs Settings -->
+              <div id="section-elevenlabs" class="hidden">
+                <div class="form-group">
+                  <label for="setting-eleven-key">ElevenLabs API Key</label>
+                  <input id="setting-eleven-key" class="settings-field" type="password" placeholder="xi-..." />
+                </div>
+                <div class="form-group">
+                  <label for="setting-eleven-model">ElevenLabs Model</label>
+                  <select id="setting-eleven-model" class="settings-field">
+                    <option value="eleven_multilingual_v2" selected>eleven_multilingual_v2 (Most Expressive)</option>
+                    <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 (Low Latency ~250ms)</option>
+                    <option value="eleven_flash_v2_5">eleven_flash_v2_5 (Ultra Fast ~75ms)</option>
+                    <option value="eleven_monolingual_v1">eleven_monolingual_v1 (Standard English)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Curated Voice Presets</label>
+                  <div class="preset-chips small" id="eleven-voice-presets">
+                    <button type="button" class="chip-btn-sm" data-voice="21m00Tcm4TlvDq8ikWAM">Rachel</button>
+                    <button type="button" class="chip-btn-sm" data-voice="EXAVITQu4vr4xnSDxMaL">Bella</button>
+                    <button type="button" class="chip-btn-sm" data-voice="piTKgcLEGmPE4e6mEKli">Nicole</button>
+                    <button type="button" class="chip-btn-sm" data-voice="AZnzlk1XvdvUeBnXmlld">Domi</button>
+                    <button type="button" class="chip-btn-sm" data-voice="ErXwobaYiN019PkySvjV">Antoni</button>
+                  </div>
+                  <input id="setting-eleven-voice-id" class="settings-field" type="text" value="21m00Tcm4TlvDq8ikWAM" />
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Live Voice Audition</span>
+              </div>
+              <div class="test-voice-bar">
+                <input id="setting-tts-test-text" class="settings-field" type="text" value="Hello! My voice engine is sounding wonderful today." />
+                <button id="setting-tts-test-btn" class="secondary-btn" type="button">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                  <span>Audition</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button id="settings-save-voice" class="primary-btn glow-btn" type="button">Save Voice Settings</button>
+              <p id="settings-save-voice-status" class="hint"></p>
+            </div>
+          </section>
+
+          <!-- 4. Speech & Mic (STT) -->
+          <section id="panel-stt" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Speech Recognition (STT) Engine</span>
+              </div>
+              <p class="hint">Choose your speech recognition engine. Local Whisper runs privately without cloud credentials.</p>
+
+              <div class="form-group">
+                <label for="setting-stt-engine">STT Provider</label>
+                <select id="setting-stt-engine" class="settings-field">
+                  <option value="google">Google Web Speech (Cloud / Free)</option>
+                  <option value="whisper">Whisper STT (Local / Multi-engine)</option>
+                </select>
+                <span id="whisper-status-hint" class="hint">Local Whisper runs offline. Automatically falls back if unavailable.</span>
+              </div>
+
+              <div class="form-group" id="row-whisper-model-size">
+                <label for="setting-whisper-size">Whisper Model Size</label>
+                <select id="setting-whisper-size" class="settings-field">
+                  <option value="tiny">Tiny (Fastest, ~39M)</option>
+                  <option value="base" selected>Base (Balanced, ~74M)</option>
+                  <option value="small">Small (Higher accuracy, ~244M)</option>
+                  <option value="medium">Medium (~769M)</option>
+                </select>
+              </div>
+
+              <div class="card-actions" style="margin-top: 10px;">
+                <button id="settings-save-stt" class="primary-btn glow-btn" type="button">Save STT Settings</button>
+                <p id="settings-save-stt-status" class="hint"></p>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Voice Activity Detection (Silero VAD)</span>
+              </div>
+              <p class="hint">Speech is processed locally in real time via client-side Silero ONNX. No audio ever streams when you are silent.</p>
+
+              <div class="form-group">
+                <div class="slider-header">
+                  <label for="setting-stt-pause">Silence Pause Threshold</label>
+                  <span id="stt-pause-val" class="slider-value">0.8s</span>
+                </div>
+                <input id="setting-stt-pause" class="custom-range" type="range" min="0.4" max="2.0" step="0.1" value="0.8" />
+                <span class="hint">How long to wait after you stop speaking before sending your message.</span>
+              </div>
+
+              <div class="form-group">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-label">Continuous Listening Mode</div>
+                    <div class="hint">Turn continuous audio capture on or off.</div>
+                  </div>
+                  <button id="stt-toggle-listen-btn" class="secondary-btn" type="button">Toggle Mic</button>
+                </div>
+              </div>
+
+              <!-- Feature 3: Wake Word Activation -->
+              <div class="form-group" style="margin-top:14px;">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-label">Wake Word Activation ("Hey Yumi")</div>
+                    <div class="hint">Only reply when addressed as "Yumi" or "Hey Yumi" (avoids replying to TV or background noise).</div>
+                  </div>
+                  <label class="switch">
+                    <input id="setting-wake-word-toggle" type="checkbox" />
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Feature 3: Full-Duplex Barge-In -->
+              <div class="form-group" style="margin-top:14px;">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-label">Full-Duplex Barge-In (Voice Interrupt)</div>
+                    <div class="hint">Immediately cuts off Yumi's speech when you speak to interrupt her.</div>
+                  </div>
+                  <label class="switch">
+                    <input id="setting-barge-in-toggle" type="checkbox" checked />
+                    <span class="slider-toggle"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 5. Memory & Data Portability -->
+          <section id="panel-memory" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Teach Her Something New</span>
+              </div>
+              <p class="hint">Instill permanent long-term memory facts directly into her knowledge graph.</p>
+              <div class="add-memory-bar">
+                <input id="manual-fact-input" class="settings-field" type="text" placeholder="e.g. My favorite anime is Steins;Gate" />
+                <button id="manual-fact-add-btn" class="secondary-btn" type="button">+ Add Fact</button>
+              </div>
+              <p id="manual-fact-status" class="hint"></p>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">What She Remembers</span>
+              </div>
+              <ul id="memory-list" class="memory-chips-list"></ul>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Local Data &amp; Backups</span>
+              </div>
+              <p class="hint">All conversation logs and memory embeddings reside locally on your device. Export a backup anytime to switch machines.</p>
+              <div class="backup-btn-row">
+                <button id="profile-export-btn" class="secondary-btn" type="button">💾 Export Backup</button>
+                <label class="secondary-btn file-btn">
+                  📥 Import Backup
+                  <input id="profile-import-file" type="file" accept=".json" hidden />
+                </label>
+                <button id="memory-graph-export-btn" class="secondary-btn" type="button">🌐 Export Graph</button>
+                <label class="secondary-btn file-btn">
+                  📥 Import Graph
+                  <input id="memory-graph-import-file" type="file" accept=".json" hidden />
+                </label>
+                <button id="clear-history-btn" class="secondary-btn" type="button">🧹 Clear History</button>
+                <button id="profile-reset-btn" class="secondary-btn danger-btn" type="button">⚠️ Reset All</button>
+              </div>
+              <p id="profile-backup-status" class="hint"></p>
+            </div>
+          </section>
+
+          <!-- Tasks & Alarms Panel -->
+          <section id="panel-tasks" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Add New Task</span>
+              </div>
+              <div class="add-task-form">
+                <input id="task-input-title" class="settings-field" type="text" placeholder="e.g. Maths practice tonight" />
+                <input id="task-input-due" class="settings-field" type="text" placeholder="Due date / time reminder (optional, e.g. tonight, 20:00)" />
+                <button id="task-add-btn" class="primary-btn glow-btn" type="button">+ Add Task</button>
+              </div>
+              <p id="task-add-status" class="hint"></p>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Active Tasks &amp; Reminders</span>
+                <div class="task-filters">
+                  <button class="chip-btn-sm active" data-task-filter="all">All</button>
+                  <button class="chip-btn-sm" data-task-filter="pending">Pending</button>
+                  <button class="chip-btn-sm" data-task-filter="completed">Completed</button>
+                </div>
+              </div>
+              <ul id="tasks-list" class="tasks-list-container"></ul>
+            </div>
+          </section>
+
+          <!-- 6. Private Diary -->
+          <section id="panel-diary" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Her Private Diary</span>
+                <button id="write-diary-btn" class="primary-btn glow-btn small-btn" type="button">Write Entry Now</button>
+              </div>
+              <p class="hint">Private journal reflections written autonomously by her after your interactions.</p>
+              <ul id="diary-list" class="diary-entries-list"></ul>
+            </div>
+          </section>
+
+          <!-- 7. Avatar & VRM Controls -->
+          <section id="panel-vrm" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Avatar Engine Mode</span>
+              </div>
+              <div class="radio-segment">
+                <label class="segment-option">
+                  <input type="radio" name="avatar-type-mode" value="vrm" checked />
+                  <span>3D VRM Model</span>
+                </label>
+                <label class="segment-option">
+                  <input type="radio" name="avatar-type-mode" value="live2d" />
+                  <span>2.5D Live2D Avatar</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Custom 3D Avatar (VRM)</span>
+              </div>
+              <p class="hint">Load any custom VRM 0.x or 1.0 avatar model from VRoid Hub or your local storage.</p>
+              <label class="primary-btn glow-btn file-btn" style="display:inline-flex; align-items:center; gap:8px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <span>Select .VRM Avatar File</span>
+                <input id="vrm-panel-upload" type="file" accept=".vrm" hidden />
+              </label>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Expression Blend Shape Tester</span>
+              </div>
+              <p class="hint">Audition your avatar's facial rig across standard emotion shapes:</p>
+              <div class="preset-chips" id="emotion-test-chips">
+                <button type="button" class="chip-btn" data-test-emotion="happy">😊 Happy</button>
+                <button type="button" class="chip-btn" data-test-emotion="embarrassed">😳 Embarrassed</button>
+                <button type="button" class="chip-btn" data-test-emotion="angry">😠 Angry</button>
+                <button type="button" class="chip-btn" data-test-emotion="sad">😢 Sad</button>
+                <button type="button" class="chip-btn" data-test-emotion="surprised">😲 Surprised</button>
+                <button type="button" class="chip-btn" data-test-emotion="neutral">😐 Neutral</button>
+              </div>
+            </div>
+
+            <!-- Feature 1: Motion & Pose Tester -->
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Motion &amp; Gesture Library</span>
+              </div>
+              <p class="hint">Trigger expressive full-body anime poses and gestures:</p>
+              <div class="preset-chips" id="gesture-test-chips">
+                <button type="button" class="chip-btn" data-test-gesture="wave">👋 Wave</button>
+                <button type="button" class="chip-btn" data-test-gesture="nod">🙆 Nod</button>
+                <button type="button" class="chip-btn" data-test-gesture="pout">😤 Pout (Tsundere)</button>
+                <button type="button" class="chip-btn" data-test-gesture="bow">🙇 Bow</button>
+                <button type="button" class="chip-btn" data-test-gesture="cheer">🎉 Cheer</button>
+                <button type="button" class="chip-btn" data-test-gesture="stretch">🧘 Stretch</button>
+                <button type="button" class="chip-btn" data-test-gesture="thinking">🤔 Thinking</button>
+              </div>
+            </div>
+
+            <!-- Feature 1: VRMA Motion Capture Clip Loader -->
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">VRMA Motion Capture Library</span>
+                <span class="badge tier-badge" id="vrma-count-badge">0 Clips</span>
+              </div>
+              <p class="hint">Load official <code>.vrma</code> animation clips (from VRoid / BOOTH / Mixamo) into Yumi's active motion mixer.</p>
+              <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">
+                <label class="primary-btn glow-btn file-btn" style="display:inline-flex; align-items:center; gap:8px;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Select .VRMA Motion Clip</span>
+                  <input id="vrma-panel-upload" type="file" accept=".vrma,.glb,.gltf" hidden />
+                </label>
+                <button id="vrma-stop-btn" class="secondary-btn" type="button">⏹️ Reset to Rest Pose</button>
+              </div>
+              <div id="vrma-clips-list" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+              <p id="vrma-upload-status" class="hint" style="margin-top:6px;"></p>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Camera Director Framing</span>
+              </div>
+              <p class="hint">Adjust the camera framing to your preferred perspective:</p>
+              <div class="preset-chips" id="camera-presets-chips">
+                <button type="button" class="chip-btn" data-cam="portrait">👤 Portrait (Face Focus)</button>
+                <button type="button" class="chip-btn active" data-cam="waist">👗 Waist (Conversational)</button>
+                <button type="button" class="chip-btn" data-cam="full">🧍 Full Body (Cinematic)</button>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Procedural Avatar Behaviors</span>
+              </div>
+              <div class="toggle-row">
+                <div>
+                  <div class="toggle-label">Natural Eye Blinking</div>
+                  <div class="hint">Periodic natural blinking with randomized micro-saccades.</div>
+                </div>
+                <label class="switch">
+                  <input id="toggle-blink" type="checkbox" checked />
+                  <span class="slider-toggle"></span>
+                </label>
+              </div>
+
+              <div class="toggle-row" style="margin-top:14px;">
+                <div>
+                  <div class="toggle-label">Cursor Look-At Tracking</div>
+                  <div class="hint">Avatar smoothly turns eyes and neck toward your pointer.</div>
+                </div>
+                <label class="switch">
+                  <input id="toggle-lookat" type="checkbox" checked />
+                  <span class="slider-toggle"></span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <!-- 8. Diagnostics & Telemetry -->
+          <section id="panel-dev" class="settings-panel">
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Live Telemetry</span>
+              </div>
+              <ul class="stats-grid">
+                <li><span class="stat-name">WebSocket</span><span id="dev-ws-status" class="stat-pill online">Connected</span></li>
+                <li><span class="stat-name">Latency</span><span id="dev-latency" class="stat-pill">~12ms</span></li>
+                <li><span class="stat-name">Active Brain</span><span id="dev-active-provider" class="stat-pill">-</span></li>
+                <li><span class="stat-name">Speech Engine</span><span id="dev-active-tts" class="stat-pill">-</span></li>
+                <li><span class="stat-name">Backend Host</span><span id="dev-backend-url" class="stat-pill">http://127.0.0.1:8000</span></li>
+              </ul>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Session Usage &amp; Tokens</span>
+              </div>
+              <ul id="usage-list" class="usage-list"></ul>
+            </div>
+
+            <div class="settings-card">
+              <div class="card-heading">
+                <span class="card-title">Raw State Inspector</span>
+              </div>
+              <button id="dev-inspect-state-btn" class="secondary-btn" type="button">Inspect Raw State JSON</button>
+              <pre id="dev-state-viewer" class="hidden code-box"></pre>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         ONBOARDING WIZARD MODAL (Utsuwa Aesthetic)
+         ============================================================ -->
+    <div id="onboarding-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-steps">
+            <span id="step-dot-1" class="step-dot active">1</span>
+            <span class="step-line"></span>
+            <span id="step-dot-2" class="step-dot">2</span>
+          </div>
+          <h2 id="onboarding-title">Welcome to Your AI Companion</h2>
+          <p id="onboarding-subtitle" class="hint">Let's shape her identity. You can always refine this later in preferences.</p>
+        </div>
+
+        <!-- Step 1: Name -->
+        <div id="onboard-step-1" class="modal-step-view active">
+          <div class="form-group">
+            <label for="onboard-name-input">What should she be named?</label>
+            <input id="onboard-name-input" type="text" class="settings-field modal-input" value="Yumi" placeholder="e.g. Yumi, Aoi, Luna, Rem..." maxlength="30" />
+            <span class="hint">Classic default companion name is <strong>Yumi</strong>.</span>
+          </div>
+
+          <div class="onboard-import-hint">
+            <span>Have an existing companion backup?</span>
+            <label class="link-btn file-link">
+              📥 Import Backup
+              <input id="onboard-import-file" type="file" accept=".json" hidden />
+            </label>
+          </div>
+
+          <div class="modal-actions">
+            <div></div>
+            <button id="onboard-next-btn" type="button" class="primary-btn glow-btn">Next: Persona &rarr;</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Personality -->
+        <div id="onboard-step-2" class="modal-step-view">
+          <div class="form-group">
+            <label for="onboard-personality-input">Select Her Personality Archetype</label>
+            <div class="preset-chips">
+              <button type="button" class="chip-btn active" data-preset="tsundere">🌸 Tsundere</button>
+              <button type="button" class="chip-btn" data-preset="sweet">💖 Sweet &amp; Caring</button>
+              <button type="button" class="chip-btn" data-preset="gamer">🎮 Sarcastic Gamer</button>
+              <button type="button" class="chip-btn" data-preset="calm">☕ Calm Philosopher</button>
+              <button type="button" class="chip-btn" data-preset="custom">✨ Custom</button>
+            </div>
+            <textarea id="onboard-personality-input" class="settings-field modal-textarea" rows="4" placeholder="Describe her demeanor, personality, or background..."></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button id="onboard-back-btn" type="button" class="secondary-btn">&larr; Back</button>
+            <button id="onboard-finish-btn" type="button" class="primary-btn glow-btn">Enter Virtual World ✨</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
+  <!-- ============================================================
+       RELATIONSHIP & MOOD PROFILE MODAL (Utsuwa Visual Novel Profile)
+       ============================================================ -->
+  <div id="relationship-modal" class="modal-backdrop hidden">
+    <div class="modal-card relationship-card">
+      <div class="vn-status-header">
+        <div class="vn-companion-title">
+          <span id="vn-char-name">Yumi</span>
+          <span id="vn-stage-tag" class="vn-stage-tag">Stranger</span>
+        </div>
+        <button id="close-relationship-modal" class="glass-btn icon-btn-sm" type="button" aria-label="Close" style="width:32px; height:32px; font-size:16px;">&times;</button>
+      </div>
+
+      <div class="vn-gauges-list">
+        <div class="vn-gauge-item">
+          <div class="vn-gauge-meta">
+            <span>Affection (Bond)</span>
+            <span id="vn-val-affection">0 / 79</span>
+          </div>
+          <div class="vn-gauge-track">
+            <div id="vn-bar-affection" class="vn-gauge-fill vn-fill-affection" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="vn-gauge-item">
+          <div class="vn-gauge-meta">
+            <span>Trust (Reliability)</span>
+            <span id="vn-val-trust">0%</span>
+          </div>
+          <div class="vn-gauge-track">
+            <div id="vn-bar-trust" class="vn-gauge-fill vn-fill-trust" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="vn-gauge-item">
+          <div class="vn-gauge-meta">
+            <span>Intimacy (Openness)</span>
+            <span id="vn-val-intimacy">0%</span>
+          </div>
+          <div class="vn-gauge-track">
+            <div id="vn-bar-intimacy" class="vn-gauge-fill vn-fill-intimacy" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="vn-gauge-item">
+          <div class="vn-gauge-meta">
+            <span>Comfort (Ease)</span>
+            <span id="vn-val-comfort">50%</span>
+          </div>
+          <div class="vn-gauge-track">
+            <div id="vn-bar-comfort" class="vn-gauge-fill vn-fill-comfort" style="width: 50%;"></div>
+          </div>
+        </div>
+
+        <div class="vn-gauge-item">
+          <div class="vn-gauge-meta">
+            <span>Respect (Mutual Regard)</span>
+            <span id="vn-val-respect">50%</span>
+          </div>
+          <div class="vn-gauge-track">
+            <div id="vn-bar-respect" class="vn-gauge-fill vn-fill-respect" style="width: 50%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vn-summary-stats">
+        <div class="vn-summary-item">
+          <span>Known For</span>
+          <span id="vn-days-known" class="vn-summary-num">1 day</span>
+        </div>
+        <div class="vn-summary-item">
+          <span>Total Turns</span>
+          <span id="vn-interaction-count" class="vn-summary-num">0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Studio Photo Flash Overlay -->
+  <div id="photo-flash-overlay" class="photo-flash-overlay"></div>
+
+  <!-- OBS Studio / Clean Desktop Companion Exit Pill -->
+  <button id="obs-exit-pill" class="obs-exit-pill hidden" title="Exit Clean Mode (Esc)">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+    <span>Exit Clean Mode</span>
+  </button>
+
+  <!-- Hidden Hardware/Media Elements -->
   <audio id="tts-audio-player" style="display:none;"></audio>
   <video id="screen-video" style="display:none;"></video>
   <video id="webcam-video" style="display:none;"></video>
@@ -102,19 +1131,17 @@
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.1/lib/three-vrm.module.js"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.1/lib/three-vrm.module.js",
+      "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@2.1.1/lib/three-vrm-animation.module.js"
     }
   }
   </script>
 
-  <!-- Client-side Silero VAD (always-on listening + barge-in). Non-module
-       script tags on purpose — vad-web exposes a global `vad` object,
-       which app.js (an ES module below) reads off `window.vad`. -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=3"></script>
 </body>
 </html>

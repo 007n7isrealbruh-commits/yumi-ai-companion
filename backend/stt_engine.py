@@ -32,18 +32,58 @@ _recognizer.dynamic_energy_threshold = True
 _whisper_model = None
 
 
+def check_whisper_available() -> dict:
+    """Checks if faster-whisper or openai-whisper is installed."""
+    try:
+        import faster_whisper
+        return {"available": True, "engine": "faster-whisper", "error": None}
+    except ImportError:
+        pass
+    try:
+        import whisper
+        return {"available": True, "engine": "openai-whisper", "error": None}
+    except ImportError:
+        return {
+            "available": False,
+            "engine": None,
+            "error": "Neither faster-whisper nor openai-whisper is installed. Install via: pip install faster-whisper soundfile",
+        }
+
+
 def _get_whisper_model():
     global _whisper_model
-    if _whisper_model is None:
+    if _whisper_model is not None:
+        return _whisper_model
+
+    model_size = getattr(settings, "whisper_model_size", "base") or "base"
+
+    # Try faster-whisper first
+    try:
         from faster_whisper import WhisperModel
-        _whisper_model = WhisperModel(settings.whisper_model_size, compute_type="int8")
-    return _whisper_model
+        print(f"[STT] Loading faster-whisper model: {model_size} (int8/cpu)...")
+        _whisper_model = ("faster-whisper", WhisperModel(model_size, device="cpu", compute_type="int8"))
+        return _whisper_model
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[STT] Failed to initialize faster-whisper ({model_size}): {e}")
+
+    # Fallback to openai-whisper
+    try:
+        import whisper
+        print(f"[STT] Loading openai-whisper model: {model_size}...")
+        _whisper_model = ("openai-whisper", whisper.load_model(model_size))
+        return _whisper_model
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[STT] Failed to initialize openai-whisper ({model_size}): {e}")
+
+    return None
 
 
 def listen_and_transcribe(timeout: int = 8, phrase_time_limit: int = 15) -> str:
-    """Blocks until the user speaks (or times out), applies VAD via
-    pause_threshold/energy_threshold, and returns the transcribed text.
-    Returns an empty string if nothing usable was captured."""
+    """Blocks until the user speaks, applies VAD, and returns transcribed text."""
     try:
         with sr.Microphone() as source:
             _recognizer.adjust_for_ambient_noise(source, duration=0.6)
@@ -75,20 +115,49 @@ def _transcribe_google(audio: sr.AudioData) -> str:
 
 
 def _transcribe_whisper(audio: sr.AudioData) -> str:
-    import io
-    import numpy as np
-    import soundfile as sf
+    backend_info = _get_whisper_model()
+    if backend_info is None:
+        print("[STT/whisper] Whisper unavailable. Falling back to Google Web Speech API.")
+        return _transcribe_google(audio)
 
-    wav_bytes = audio.get_wav_data()
-    data, samplerate = sf.read(io.BytesIO(wav_bytes), dtype="float32")
-    if data.ndim > 1:
-        data = np.mean(data, axis=1)
+    engine_type, model = backend_info
 
-    model = _get_whisper_model()
-    segments, _ = model.transcribe(data, language="en", vad_filter=True)
-    text = " ".join(segment.text.strip() for segment in segments).strip()
-    print(f"[STT/whisper] Heard: {text}")
-    return text
+    try:
+        wav_bytes = audio.get_wav_data()
+        if not wav_bytes:
+            print("[STT/whisper] Audio buffer is empty.")
+            return ""
+
+        if engine_type == "faster-whisper":
+            import numpy as np
+            import soundfile as sf
+            data, samplerate = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+            if data.ndim > 1:
+                data = np.mean(data, axis=1)
+            segments, _ = model.transcribe(data, language="en", vad_filter=True)
+            text = " ".join(segment.text.strip() for segment in segments).strip()
+            print(f"[STT/faster-whisper] Heard: {text}")
+            return text
+
+        elif engine_type == "openai-whisper":
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(wav_bytes)
+                temp_path = f.name
+            try:
+                result = model.transcribe(temp_path, language="en")
+                text = (result.get("text") or "").strip()
+                print(f"[STT/openai-whisper] Heard: {text}")
+                return text
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+    except Exception as e:
+        print(f"[STT/whisper] Transcription failed ({e}). Falling back to Google Speech.")
+        return _transcribe_google(audio)
+
+    return ""
 
 
 def transcribe_wav_bytes(wav_bytes: bytes) -> str:
